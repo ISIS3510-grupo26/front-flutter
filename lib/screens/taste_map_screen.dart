@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -78,12 +80,8 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
             ),
           ),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
+            child: LayoutBuilder(
+              builder: (context, constraints) {
                     final w = constraints.maxWidth;
                     final h = constraints.maxHeight;
                     return Stack(
@@ -175,11 +173,9 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                         ),
                       ],
                     );
-                  },
-                ),
+                },
               ),
             ),
-          ),
         ],
       ),
     );
@@ -225,39 +221,52 @@ class _Pin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = selected ? AppColors.tomato : AppColors.espresso;
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.tomato : AppColors.espresso,
-          borderRadius: BorderRadius.circular(999),
-          border: selected ? Border.all(color: Colors.white, width: 3) : null,
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: AppColors.espresso.withValues(alpha: 0.25),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(spot.emoji, style: const TextStyle(fontSize: 14)),
-            const SizedBox(width: 4),
-            Text(
-              '${spot.affinity}%',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-              ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(999),
+              border: selected ? Border.all(color: Colors.white, width: 3) : null,
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                        color: AppColors.espresso.withValues(alpha: 0.25),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : null,
             ),
-          ],
-        ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(spot.emoji, style: const TextStyle(fontSize: 14)),
+                const SizedBox(width: 4),
+                Text(
+                  '${spot.affinity}%',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Transform.translate(
+            offset: const Offset(0, -3),
+            child: Transform.rotate(
+              angle: pi / 4,
+              child: Container(width: 8, height: 8, color: color),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -379,7 +388,9 @@ class _SelectedPlaceCard extends StatelessWidget {
                   children: [
                     const _MetaPill(label: 'Quick Line', background: AppColors.tomatoLight, foreground: AppColors.tomato),
                     const SizedBox(width: 8),
-                    _MetaPill(label: spot.location, background: AppColors.surface, foreground: AppColors.espresso),
+                    Flexible(
+                      child: _MetaPill(label: spot.location, background: AppColors.surface, foreground: AppColors.espresso),
+                    ),
                   ],
                 ),
               ],
@@ -425,6 +436,8 @@ class _MetaPill extends StatelessWidget {
       ),
       child: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: foreground),
       ),
     );
