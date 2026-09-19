@@ -15,9 +15,20 @@ class AppTheme {
         secondary: AppColors.mint,
         surface: AppColors.card,
       ),
+      fontFamily: 'WorkSans',
       textTheme: const TextTheme().apply(
         bodyColor: AppColors.espresso,
         displayColor: AppColors.espresso,
+      ).copyWith(
+        displayLarge: const TextStyle(fontFamily: 'DMSans'),
+        displayMedium: const TextStyle(fontFamily: 'DMSans'),
+        displaySmall: const TextStyle(fontFamily: 'DMSans'),
+        headlineLarge: const TextStyle(fontFamily: 'DMSans'),
+        headlineMedium: const TextStyle(fontFamily: 'DMSans'),
+        headlineSmall: const TextStyle(fontFamily: 'DMSans'),
+        titleLarge: const TextStyle(fontFamily: 'DMSans'),
+        titleMedium: const TextStyle(fontFamily: 'DMSans'),
+        titleSmall: const TextStyle(fontFamily: 'DMSans'),
       ),
     );
   }
