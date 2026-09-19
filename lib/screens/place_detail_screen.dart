@@ -14,11 +14,13 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      bottom: false,
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
+    return Scaffold(
+      backgroundColor: AppColors.cream,
+      body: SafeArea(
+        bottom: false,
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               child: Row(
@@ -176,20 +178,20 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: AppColors.mint,
+                          color: AppColors.mintLight,
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.circle, size: 8, color: Colors.white),
+                            Icon(Icons.circle, size: 8, color: AppColors.mint),
                             SizedBox(width: 6),
                             Text(
                               'Open Now',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.white,
+                                color: AppColors.mint,
                               ),
                             ),
                           ],
@@ -289,46 +291,43 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
               ],
             ),
           ),
-          SliverFillRemaining(
-            hasScrollBody: false,
-            fillOverscroll: false,
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.tomato,
-                      disabledBackgroundColor: AppColors.tomato,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.explore_outlined, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text(
-                          'Get Walking Directions ($_walkMinutes min)',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
+        ],
+      ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.tomato,
+                disabledBackgroundColor: AppColors.tomato,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.explore_outlined, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text(
+                    'Get Walking Directions ($_walkMinutes min)',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
                     ),
                   ),
-                ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -352,10 +351,14 @@ class _StatTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: AppColors.tomato),
+          Row(
+            children: [
+              Icon(icon, size: 18, color: AppColors.tomato),
+              const SizedBox(width: 8),
+              Text(label, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+            ],
+          ),
           const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-          const SizedBox(height: 2),
           Text(
             value,
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.espresso),
