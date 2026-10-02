@@ -5,7 +5,9 @@ import 'taste_profile_screen.dart';
 import 'dietary_preferences_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key});
+  final VoidCallback onSignOut;
+
+  const ProfileScreen({super.key, required this.onSignOut});
 
   static const _tasteTags = [
     'Burgers',
@@ -61,7 +63,7 @@ class ProfileScreen extends StatelessWidget {
                   const _AchievementsSection(),
                   const SizedBox(height: 24),
 
-                  _SettingsCard(),
+                  _SettingsCard(onSignOut: onSignOut),
                 ],
               ),
             ),
@@ -514,7 +516,9 @@ class _BadgeItem extends StatelessWidget {
 }
 
 class _SettingsCard extends StatelessWidget {
-  const _SettingsCard();
+  final VoidCallback onSignOut;
+
+  const _SettingsCard({required this.onSignOut});
 
   @override
   Widget build(BuildContext context) {
@@ -564,6 +568,16 @@ class _SettingsCard extends StatelessWidget {
             icon: Icons.notifications_none,
             iconBackground: AppColors.surface,
             title: 'Notifications',
+          ),
+          const Divider(
+            height: 1,
+            color: AppColors.border,
+          ),
+          _ProfileMenuRow(
+            icon: Icons.logout,
+            iconBackground: AppColors.surface,
+            title: 'Sign out',
+            onTap: onSignOut,
           ),
         ],
       ),

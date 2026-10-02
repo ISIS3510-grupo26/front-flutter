@@ -1,17 +1,41 @@
 import 'package:flutter/material.dart';
 
 import '../models/spot.dart';
+import '../services/nearby_favorites_loader.dart';
 import '../theme/app_colors.dart';
+import '../widgets/nearby_failure_view.dart';
 import '../widgets/spot_card.dart';
+
+sealed class _Filter {
+  const _Filter();
+}
+
+final class _All extends _Filter {
+  const _All();
+}
+
+final class _ByCategory extends _Filter {
+  final SpotCategory category;
+
+  const _ByCategory(this.category);
+}
+
+final class _Nearby extends _Filter {
+  final NearbyState state;
+
+  const _Nearby(this.state);
+}
 
 class SavedPlacesScreen extends StatefulWidget {
   final List<Spot> spots;
   final ValueChanged<String> onToggleSaved;
+  final NearbyFavoritesLoader nearbyLoader;
 
   const SavedPlacesScreen({
     super.key,
     required this.spots,
     required this.onToggleSaved,
+    required this.nearbyLoader,
   });
 
   @override
@@ -19,23 +43,39 @@ class SavedPlacesScreen extends StatefulWidget {
 }
 
 class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
-  SpotCategory? _selectedCategory;
+  static const _maxWalk = NearbyFavoritesLoader.maxWalkMinutes;
 
-  List<Spot> get _savedSpots => widget.spots.where((s) => s.isSaved).toList();
+  _Filter _filter = const _All();
 
-  List<Spot> get _filteredSpots {
-    final saved = _savedSpots;
-    if (_selectedCategory == null) return saved;
-    return saved.where((s) => s.category == _selectedCategory).toList();
+  bool get _nearbyLoading =>
+      switch (_filter) { _Nearby(state: NearbyLoading()) => true, _ => false };
+
+  Future<void> _showNearby() async {
+    if (_nearbyLoading) return;
+    setState(() => _filter = const _Nearby(NearbyLoading()));
+    final state = await widget.nearbyLoader.load();
+    // Drop the result if the user switched filters while it was loading.
+    if (mounted && _nearbyLoading) {
+      setState(() => _filter = _Nearby(state));
+    }
   }
 
-  int _countFor(SpotCategory category) =>
-      _savedSpots.where((s) => s.category == category).length;
+  List<Spot> _visible(List<Spot> saved) => switch (_filter) {
+        _All() => saved,
+        _ByCategory(:final category) =>
+          saved.where((s) => s.category == category).toList(),
+        _Nearby(state: NearbyLoaded(:final walkMinutes)) => [
+            for (final s in saved)
+              if (walkMinutes[s.id] case final minutes?)
+                s.copyWith(walkMinutes: minutes, distance: '$minutes min walk'),
+          ]..sort((a, b) => a.walkMinutes.compareTo(b.walkMinutes)),
+        _Nearby() => const [],
+      };
 
   @override
   Widget build(BuildContext context) {
-    final saved = _savedSpots;
-    final filtered = _filteredSpots;
+    final saved = widget.spots.where((s) => s.isSaved).toList();
+    final visible = _visible(saved);
     return SafeArea(
       bottom: false,
       child: CustomScrollView(
@@ -73,25 +113,32 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                         _FilterPill(
                           label: 'All Saved',
                           count: saved.length,
-                          active: _selectedCategory == null,
-                          onTap: () => setState(() => _selectedCategory = null),
+                          active: _filter is _All,
+                          onTap: () => setState(() => _filter = const _All()),
                         ),
                         const SizedBox(width: 10),
                         _FilterPill(
-                          label: SpotCategory.foodTrucks.label,
-                          count: _countFor(SpotCategory.foodTrucks),
-                          active: _selectedCategory == SpotCategory.foodTrucks,
-                          onTap: () => setState(
-                              () => _selectedCategory = SpotCategory.foodTrucks),
+                          label: 'Open • ≤$_maxWalk min',
+                          count: switch (_filter) {
+                            _Nearby(state: NearbyLoaded()) => visible.length,
+                            _ => null,
+                          },
+                          active: _filter is _Nearby,
+                          onTap: _showNearby,
                         ),
-                        const SizedBox(width: 10),
-                        _FilterPill(
-                          label: SpotCategory.studySpots.label,
-                          count: _countFor(SpotCategory.studySpots),
-                          active: _selectedCategory == SpotCategory.studySpots,
-                          onTap: () => setState(
-                              () => _selectedCategory = SpotCategory.studySpots),
-                        ),
+                        for (final category in SpotCategory.values) ...[
+                          const SizedBox(width: 10),
+                          _FilterPill(
+                            label: category.label,
+                            count: saved.where((s) => s.category == category).length,
+                            active: switch (_filter) {
+                              _ByCategory(category: final c) => c == category,
+                              _ => false,
+                            },
+                            onTap: () =>
+                                setState(() => _filter = _ByCategory(category)),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -100,31 +147,52 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
               ),
             ),
           ),
-          if (filtered.isEmpty)
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(
-                child: Text(
-                  'No saved places in this category yet.',
-                  style: TextStyle(color: AppColors.muted),
+          switch (_filter) {
+            _Nearby(state: NearbyLoading()) => const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: CircularProgressIndicator(color: AppColors.tomato),
                 ),
               ),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
-              sliver: SliverList.separated(
-                itemCount: filtered.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 14),
-                itemBuilder: (context, index) {
-                  final spot = filtered[index];
-                  return SpotCard(
-                    spot: spot,
-                    onToggleSaved: () => widget.onToggleSaved(spot.id),
-                  );
-                },
+            _Nearby(state: NearbyFailed(:final failure)) => SliverFillRemaining(
+                hasScrollBody: false,
+                child: NearbyFailureView(
+                  failure: failure,
+                  onRetry: _showNearby,
+                  onOpenSettings: widget.nearbyLoader.openLocationSettings,
+                ),
               ),
-            ),
+            _ when visible.isEmpty => SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      _filter is _Nearby
+                          ? 'None of your saved places are open within a '
+                              '$_maxWalk-minute walk right now.'
+                          : 'No saved places in this category yet.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppColors.muted),
+                    ),
+                  ),
+                ),
+              ),
+            _ => SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+                sliver: SliverList.separated(
+                  itemCount: visible.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 14),
+                  itemBuilder: (context, index) {
+                    final spot = visible[index];
+                    return SpotCard(
+                      spot: spot,
+                      onToggleSaved: () => widget.onToggleSaved(spot.id),
+                    );
+                  },
+                ),
+              ),
+          },
         ],
       ),
     );
@@ -133,7 +201,7 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
 
 class _FilterPill extends StatelessWidget {
   final String label;
-  final int count;
+  final int? count;
   final bool active;
   final VoidCallback onTap;
 
@@ -167,24 +235,26 @@ class _FilterPill extends StatelessWidget {
                 color: active ? Colors.white : AppColors.espresso,
               ),
             ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: active
-                    ? Colors.white.withValues(alpha: 0.2)
-                    : AppColors.tomatoLight,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: active ? Colors.white : AppColors.tomato,
+            if (count != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: active
+                      ? Colors.white.withValues(alpha: 0.2)
+                      : AppColors.tomatoLight,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: active ? Colors.white : AppColors.tomato,
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ),

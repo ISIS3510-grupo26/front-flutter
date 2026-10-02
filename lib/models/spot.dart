@@ -75,7 +75,7 @@ class Spot {
         FeedFilterType.highProtein => isHighProtein,
       };
 
-  Spot copyWith({bool? isSaved}) {
+  Spot copyWith({bool? isSaved, String? distance, int? walkMinutes}) {
     return Spot(
       id: id,
       emoji: emoji,
@@ -85,8 +85,8 @@ class Spot {
       subtitle: subtitle,
       rating: rating,
       price: price,
-      distance: distance,
-      walkMinutes: walkMinutes,
+      distance: distance ?? this.distance,
+      walkMinutes: walkMinutes ?? this.walkMinutes,
       isBudget: isBudget,
       isVegetarian: isVegetarian,
       isHighProtein: isHighProtein,
