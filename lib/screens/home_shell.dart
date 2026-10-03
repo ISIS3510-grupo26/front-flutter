@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../repositories/favorites_repository.dart';
+import '../repositories/recommendations_repository.dart';
 import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/favorites_controller.dart';
 import '../services/nearby_favorites_loader.dart';
+import '../services/taste_map_loader.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
@@ -39,6 +41,11 @@ class _HomeShellState extends State<HomeShell> {
   );
   late final _nearbyLoader = NearbyFavoritesLoader(
     favorites: _api,
+    currentUserId: () => widget.session.userId,
+  );
+  late final _recommendations = RecommendationsRepository(client: _http);
+  late final _tasteMapLoader = TasteMapLoader(
+    recommendations: _recommendations,
     currentUserId: () => widget.session.userId,
   );
 
@@ -89,7 +96,7 @@ class _HomeShellState extends State<HomeShell> {
           index: _index,
           children: [
             ForYouScreen(spots: _favorites.spots, onToggleSaved: _toggleSaved),
-            const TasteMapScreen(),
+            TasteMapScreen(loader: _tasteMapLoader),
             SavedPlacesScreen(
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,

@@ -1,24 +1,43 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
+import '../models/nearby_pick.dart';
+import '../services/taste_map_loader.dart';
 import '../theme/app_colors.dart';
 import 'place_detail_screen.dart';
 
 class TasteMapScreen extends StatefulWidget {
-  const TasteMapScreen({super.key});
+  final TasteMapLoader loader;
+
+  const TasteMapScreen({super.key, required this.loader});
 
   @override
   State<TasteMapScreen> createState() => _TasteMapScreenState();
 }
 
 class _TasteMapScreenState extends State<TasteMapScreen> {
+  TasteMapState _state = const TasteMapLoading();
   int _selected = 0;
-  final List<_MapSpot> _spots = _sampleMapSpots;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _state = const TasteMapLoading());
+    final state = await widget.loader.load();
+    if (!mounted) return;
+    setState(() {
+      _state = state;
+      _selected = 0;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final selected = _spots[_selected];
     return SafeArea(
       bottom: false,
       child: Column(
@@ -80,144 +99,220 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
             ),
           ),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                    final w = constraints.maxWidth;
-                    final h = constraints.maxHeight;
-                    return Stack(
+            child: switch (_state) {
+              TasteMapLoading() => const Center(
+                  child: CircularProgressIndicator(color: AppColors.tomato),
+                ),
+              TasteMapFailed(:final reason) =>
+                _FailedView(reason: reason, onRetry: _load),
+              TasteMapLoaded(:final picks, :final userLat, :final userLng, :final usedFallback) =>
+                Stack(
+                  children: [
+                    FlutterMap(
+                      options: MapOptions(
+                        initialCenter: LatLng(userLat, userLng),
+                        initialZoom: 17,
+                      ),
                       children: [
-                        Container(color: const Color(0xFFD9EDE2)),
-                        Positioned(
-                          left: w * 0.05,
-                          top: h * 0.08,
-                          child: _zoneBlock(120, 90, const Color(0xFFE4D5CC)),
+                        TileLayer(
+                          urlTemplate:
+                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'com.example.campus_bites',
                         ),
-                        Positioned(
-                          left: w * 0.45,
-                          top: h * 0.05,
-                          child: _zoneBlock(140, 70, const Color(0xFFF2CFC6)),
-                        ),
-                        Positioned(
-                          left: w * 0.7,
-                          top: h * 0.3,
-                          child: _zoneBlock(90, 110, const Color(0xFFE4D5CC)),
-                        ),
-                        Positioned(
-                          left: w * 0.08,
-                          top: h * 0.45,
-                          child: _zoneBlock(100, 80, const Color(0xFFF2CFC6)),
-                        ),
-                        Positioned(
-                          left: w * 0.4,
-                          top: h * 0.55,
-                          child: _zoneBlock(130, 95, const Color(0xFFE4D5CC)),
-                        ),
-                        Positioned(
-                          left: w * 0.65,
-                          top: h * 0.68,
-                          child: _zoneBlock(110, 75, const Color(0xFFF2CFC6)),
-                        ),
-                        Positioned(
-                          left: 0,
-                          top: h * 0.27,
-                          child: Container(width: w, height: 14, color: AppColors.cream),
-                        ),
-                        Positioned(
-                          left: 0,
-                          top: h * 0.62,
-                          child: Container(width: w, height: 14, color: AppColors.cream),
-                        ),
-                        Positioned(
-                          left: w * 0.32,
-                          top: 0,
-                          child: Container(width: 14, height: h, color: AppColors.cream),
-                        ),
-                        Positioned(
-                          left: w * 0.78,
-                          top: 0,
-                          child: Container(width: 14, height: h, color: AppColors.cream),
-                        ),
-                        const Positioned(left: 16, top: 16, child: _ZoneLabel('SCIENCE QUAD')),
-                        const Positioned(right: 16, top: 40, child: _ZoneLabel('ENGINEERING HUB')),
-                        const Positioned(left: 16, bottom: 140, child: _ZoneLabel('STUDENT UNION')),
-                        const Positioned(right: 16, bottom: 110, child: _ZoneLabel('SPORTS ARENA')),
-                        Positioned(
-                          top: 16,
-                          right: 16,
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            alignment: Alignment.center,
-                            decoration: const BoxDecoration(
-                              color: AppColors.card,
-                              shape: BoxShape.circle,
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: LatLng(userLat, userLng),
+                              width: 18,
+                              height: 18,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: AppColors.tomato,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 3),
+                                ),
+                              ),
                             ),
-                            child: const Icon(Icons.navigation_outlined, color: AppColors.espresso),
-                          ),
-                        ),
-                        for (var i = 0; i < _spots.length; i++)
-                          Positioned(
-                            left: _spots[i].dx * w - 28,
-                            top: _spots[i].dy * h - 18,
-                            child: _Pin(
-                              spot: _spots[i],
-                              selected: i == _selected,
-                              onTap: () => setState(() => _selected = i),
-                            ),
-                          ),
-                        Positioned(
-                          left: 16,
-                          right: 16,
-                          bottom: 16,
-                          child: _SelectedPlaceCard(spot: selected),
+                            for (var i = 0; i < picks.length; i++)
+                              Marker(
+                                point: LatLng(
+                                  picks[i].latitude,
+                                  picks[i].longitude,
+                                ),
+                                // Tall enough for the selected pin, which adds
+                                // a 3px white border on top of the base size.
+                                width: 110,
+                                height: 52,
+                                alignment: Alignment.topCenter,
+                                child: _Pin(
+                                  pick: picks[i],
+                                  selected: i == _selected,
+                                  onTap: () => setState(() => _selected = i),
+                                ),
+                              ),
+                          ],
                         ),
                       ],
-                    );
-                },
-              ),
-            ),
+                    ),
+                    Positioned(
+                      top: 16,
+                      right: 16,
+                      child: GestureDetector(
+                        onTap: _load,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          decoration: const BoxDecoration(
+                            color: AppColors.card,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.navigation_outlined, color: AppColors.espresso),
+                        ),
+                      ),
+                    ),
+                    if (usedFallback)
+                      const Positioned(
+                        left: 16,
+                        top: 16,
+                        right: 72,
+                        child: _FallbackBanner(),
+                      ),
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          const _Attribution(),
+                          const SizedBox(height: 6),
+                          if (picks.isEmpty)
+                            const _NoPicksCard()
+                          else
+                            _SelectedPlaceCard(
+                              pick: picks[_selected],
+                              rank: _selected + 1,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+            },
+          ),
         ],
-      ),
-    );
-  }
-
-  Widget _zoneBlock(double width, double height, Color color) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(16),
       ),
     );
   }
 }
 
-class _ZoneLabel extends StatelessWidget {
-  final String label;
+class _FailedView extends StatelessWidget {
+  final TasteMapFailure reason;
+  final VoidCallback onRetry;
 
-  const _ZoneLabel(this.label);
+  const _FailedView({required this.reason, required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 1.2,
-        color: AppColors.muted,
+    final message = switch (reason) {
+      TasteMapFailure.signedOut => 'Sign in to see top spots near you.',
+      TasteMapFailure.network =>
+        "Couldn't reach CampusBites. Check your connection and try again.",
+    };
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted),
+            ),
+            const SizedBox(height: 8),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FallbackBanner extends StatelessWidget {
+  const _FallbackBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: const Text(
+        'Location off - showing picks near campus',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: AppColors.espresso,
+        ),
+      ),
+    );
+  }
+}
+
+class _Attribution extends StatelessWidget {
+  const _Attribution();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: const Text(
+        '© OpenStreetMap contributors',
+        style: TextStyle(fontSize: 9, color: AppColors.muted),
+      ),
+    );
+  }
+}
+
+class _NoPicksCard extends StatelessWidget {
+  const _NoPicksCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: const Text(
+        "You've tried every top spot nearby",
+        textAlign: TextAlign.center,
+        style: TextStyle(color: AppColors.muted),
       ),
     );
   }
 }
 
 class _Pin extends StatelessWidget {
-  final _MapSpot spot;
+  final NearbyPick pick;
   final bool selected;
   final VoidCallback onTap;
 
-  const _Pin({required this.spot, required this.selected, required this.onTap});
+  const _Pin({required this.pick, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -226,6 +321,7 @@ class _Pin extends StatelessWidget {
       onTap: onTap,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -246,10 +342,10 @@ class _Pin extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(spot.emoji, style: const TextStyle(fontSize: 14)),
+                Text(pick.emoji, style: const TextStyle(fontSize: 14)),
                 const SizedBox(width: 4),
                 Text(
-                  '${spot.affinity}%',
+                  '★ ${pick.rating}',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
@@ -273,9 +369,10 @@ class _Pin extends StatelessWidget {
 }
 
 class _SelectedPlaceCard extends StatelessWidget {
-  final _MapSpot spot;
+  final NearbyPick pick;
+  final int rank;
 
-  const _SelectedPlaceCard({required this.spot});
+  const _SelectedPlaceCard({required this.pick, required this.rank});
 
   @override
   Widget build(BuildContext context) {
@@ -300,7 +397,7 @@ class _SelectedPlaceCard extends StatelessWidget {
                   color: AppColors.surface,
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Text(spot.emoji, style: const TextStyle(fontSize: 28)),
+                child: Text(pick.emoji, style: const TextStyle(fontSize: 28)),
               ),
               Positioned(
                 top: -6,
@@ -314,7 +411,7 @@ class _SelectedPlaceCard extends StatelessWidget {
                     shape: BoxShape.circle,
                   ),
                   child: Text(
-                    '${spot.rank}',
+                    '$rank',
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
@@ -334,7 +431,7 @@ class _SelectedPlaceCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        spot.name,
+                        pick.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -347,7 +444,7 @@ class _SelectedPlaceCard extends StatelessWidget {
                     const Icon(Icons.star, size: 14, color: AppColors.tomato),
                     const SizedBox(width: 2),
                     Text(
-                      '${spot.rating}',
+                      '${pick.rating}',
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -357,41 +454,17 @@ class _SelectedPlaceCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: spot.price,
-                        style: const TextStyle(fontSize: 12, color: AppColors.espresso),
-                      ),
-                      const TextSpan(text: ' • ', style: TextStyle(color: AppColors.muted)),
-                      TextSpan(
-                        text: spot.walkLabel,
-                        style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                      ),
-                      const TextSpan(text: ' • ', style: TextStyle(color: AppColors.muted)),
-                      TextSpan(
-                        text: '${spot.affinity}% Taste Match',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.mint,
-                        ),
-                      ),
-                    ],
-                  ),
+                Text(
+                  '${pick.walkMinutes} min walk',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const _MetaPill(label: 'Quick Line', background: AppColors.tomatoLight, foreground: AppColors.tomato),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: _MetaPill(label: spot.location, background: AppColors.surface, foreground: AppColors.espresso),
-                    ),
-                  ],
+                const _MetaPill(
+                  label: 'New for you',
+                  background: AppColors.mintLight,
+                  foreground: AppColors.mint,
                 ),
               ],
             ),
@@ -443,92 +516,3 @@ class _MetaPill extends StatelessWidget {
     );
   }
 }
-
-class _MapSpot {
-  final String emoji;
-  final String name;
-  final int affinity;
-  final double rating;
-  final String price;
-  final String walkLabel;
-  final String location;
-  final int rank;
-  final double dx;
-  final double dy;
-
-  const _MapSpot({
-    required this.emoji,
-    required this.name,
-    required this.affinity,
-    required this.rating,
-    required this.price,
-    required this.walkLabel,
-    required this.location,
-    required this.rank,
-    required this.dx,
-    required this.dy,
-  });
-}
-
-const List<_MapSpot> _sampleMapSpots = [
-  _MapSpot(
-    emoji: '🍔',
-    name: 'La Esquina Burger Lab',
-    affinity: 98,
-    rating: 4.8,
-    price: '\$16k - \$22k COP',
-    walkLabel: '3 min walk',
-    location: 'North Quad Plaza',
-    rank: 1,
-    dx: 0.28,
-    dy: 0.22,
-  ),
-  _MapSpot(
-    emoji: '🥗',
-    name: 'Green Bowl Co.',
-    affinity: 91,
-    rating: 4.0,
-    price: '\$15k COP',
-    walkLabel: '3 min walk',
-    location: 'Central Library 1F',
-    rank: 2,
-    dx: 0.62,
-    dy: 0.15,
-  ),
-  _MapSpot(
-    emoji: '☕',
-    name: 'Nitro Coffee & Brew',
-    affinity: 87,
-    rating: 4.6,
-    price: '\$8k COP',
-    walkLabel: '5 min walk',
-    location: 'Engineering Hub',
-    rank: 3,
-    dx: 0.8,
-    dy: 0.45,
-  ),
-  _MapSpot(
-    emoji: '🌮',
-    name: 'Taco Fiesta Truck',
-    affinity: 84,
-    rating: 4.5,
-    price: '\$12k COP',
-    walkLabel: '6 min walk',
-    location: 'Student Union',
-    rank: 4,
-    dx: 0.18,
-    dy: 0.65,
-  ),
-  _MapSpot(
-    emoji: '🍜',
-    name: 'Ramen Corner',
-    affinity: 79,
-    rating: 4.3,
-    price: '\$18k COP',
-    walkLabel: '8 min walk',
-    location: 'Sports Arena',
-    rank: 5,
-    dx: 0.55,
-    dy: 0.78,
-  ),
-];
