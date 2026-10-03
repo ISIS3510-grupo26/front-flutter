@@ -97,6 +97,17 @@ class AuthSession extends ChangeNotifier {
     _set(AuthSignedIn(user));
   }
 
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    final token = accessToken;
+    if (token == null) throw StateError('No signed-in account');
+    try {
+      await _signIn(_repository.changePassword(token, currentPassword, newPassword));
+    } on ApiException catch (e) {
+      if (e.statusCode == 401) await expire(token);
+      rethrow;
+    }
+  }
+
   void continueAsDevUser() {
     if (canUseDevUser) _set(AuthDevUser(_devUserId));
   }

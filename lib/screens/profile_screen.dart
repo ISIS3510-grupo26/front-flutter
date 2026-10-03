@@ -7,7 +7,9 @@ import 'dietary_preferences_screen.dart';
 class ProfileScreen extends StatelessWidget {
   final VoidCallback onSignOut;
 
-  const ProfileScreen({super.key, required this.onSignOut});
+  final VoidCallback? onChangePassword;
+
+  const ProfileScreen({super.key, required this.onSignOut, this.onChangePassword});
 
   static const _tasteTags = [
     'Burgers',
@@ -63,7 +65,10 @@ class ProfileScreen extends StatelessWidget {
                   const _AchievementsSection(),
                   const SizedBox(height: 24),
 
-                  _SettingsCard(onSignOut: onSignOut),
+                  _SettingsCard(
+                    onSignOut: onSignOut,
+                    onChangePassword: onChangePassword,
+                  ),
                 ],
               ),
             ),
@@ -517,8 +522,9 @@ class _BadgeItem extends StatelessWidget {
 
 class _SettingsCard extends StatelessWidget {
   final VoidCallback onSignOut;
+  final VoidCallback? onChangePassword;
 
-  const _SettingsCard({required this.onSignOut});
+  const _SettingsCard({required this.onSignOut, this.onChangePassword});
 
   @override
   Widget build(BuildContext context) {
@@ -573,6 +579,18 @@ class _SettingsCard extends StatelessWidget {
             height: 1,
             color: AppColors.border,
           ),
+          if (onChangePassword != null) ...[
+            _ProfileMenuRow(
+              icon: Icons.lock_outline,
+              iconBackground: AppColors.tomatoLight,
+              title: 'Change password',
+              onTap: onChangePassword,
+            ),
+            const Divider(
+              height: 1,
+              color: AppColors.border,
+            ),
+          ],
           _ProfileMenuRow(
             icon: Icons.logout,
             iconBackground: AppColors.surface,

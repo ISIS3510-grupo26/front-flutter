@@ -10,15 +10,25 @@ import '../theme/app_colors.dart';
 class SpotCard extends StatelessWidget {
   final Spot spot;
   final VoidCallback onToggleSaved;
+  final VoidCallback? onTap;
 
   const SpotCard({
     super.key,
     required this.spot,
     required this.onToggleSaved,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: _buildCard(),
+    );
+  }
+
+  Widget _buildCard() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

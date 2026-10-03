@@ -1,4 +1,4 @@
-import 'dart:convert';
+  import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
@@ -30,6 +30,28 @@ class AuthRepository {
     expectStatus(response, 200);
   }
 
+  Future<AuthUser> changePassword(
+    String accessToken,
+    String currentPassword,
+    String newPassword,
+  ) async {
+    final response = await _client
+        .post(
+          Uri.parse('$_baseUrl/auth/change-password'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode({
+            'currentPassword': currentPassword,
+            'newPassword': newPassword,
+          }),
+        )
+        .timeout(apiTimeout);
+    expectStatus(response, 200);
+    return AuthUser.fromJson(decodeJson(response) as Map<String, dynamic>);
+  }
+  
   Future<AuthUser> _authenticate(
     String endpoint,
     int expectedStatus,
