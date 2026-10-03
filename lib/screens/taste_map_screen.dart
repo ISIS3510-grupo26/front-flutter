@@ -5,12 +5,13 @@ import 'package:latlong2/latlong.dart';
 import '../models/nearby_pick.dart';
 import '../services/taste_map_loader.dart';
 import '../theme/app_colors.dart';
-import 'place_detail_screen.dart';
 
 class TasteMapScreen extends StatefulWidget {
   final TasteMapLoader loader;
 
-  const TasteMapScreen({super.key, required this.loader});
+  final ValueChanged<String>? onOpenSpot;
+
+  const TasteMapScreen({super.key, required this.loader, this.onOpenSpot});
 
   @override
   State<TasteMapScreen> createState() => _TasteMapScreenState();
@@ -193,6 +194,9 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                             _SelectedPlaceCard(
                               pick: picks[_selected],
                               rank: _selected + 1,
+                              onOpen: widget.onOpenSpot == null
+                                  ? null
+                                  : () => widget.onOpenSpot!(picks[_selected].id),
                             ),
                         ],
                       ),
@@ -371,8 +375,9 @@ class _Pin extends StatelessWidget {
 class _SelectedPlaceCard extends StatelessWidget {
   final NearbyPick pick;
   final int rank;
+  final VoidCallback? onOpen;
 
-  const _SelectedPlaceCard({required this.pick, required this.rank});
+  const _SelectedPlaceCard({required this.pick, required this.rank, this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -471,10 +476,7 @@ class _SelectedPlaceCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const PlaceDetailScreen()),
-            ),
+            onTap: onOpen,
             child: Container(
               width: 40,
               height: 40,

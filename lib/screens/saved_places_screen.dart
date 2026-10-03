@@ -29,12 +29,14 @@ final class _Nearby extends _Filter {
 class SavedPlacesScreen extends StatefulWidget {
   final List<Spot> spots;
   final ValueChanged<String> onToggleSaved;
+  final ValueChanged<String>? onOpenSpot;
   final NearbyFavoritesLoader nearbyLoader;
 
   const SavedPlacesScreen({
     super.key,
     required this.spots,
     required this.onToggleSaved,
+    this.onOpenSpot,
     required this.nearbyLoader,
   });
 
@@ -188,6 +190,7 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                     return SpotCard(
                       spot: spot,
                       onToggleSaved: () => widget.onToggleSaved(spot.id),
+                    onTap: widget.onOpenSpot == null ? null : () => widget.onOpenSpot!(spot.id),
                     );
                   },
                 ),

@@ -1,9 +1,33 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../models/spot_detail.dart';
+import '../models/telemetry_event.dart';
+import '../repositories/api_exception.dart';
+import '../repositories/spots_repository.dart';
+import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
+import 'write_review_screen.dart';
 
 class PlaceDetailScreen extends StatefulWidget {
-  const PlaceDetailScreen({super.key});
+  final String spotId;
+  final SpotsRepository repository;
+  final TelemetryQueue telemetry;
+  final String? Function() currentUserId;
+
+  final bool canReview;
+
+  const PlaceDetailScreen({
+    super.key,
+    required this.spotId,
+    required this.repository,
+    required this.telemetry,
+    required this.currentUserId,
+    required this.canReview,
+  });
 
   @override
   State<PlaceDetailScreen> createState() => _PlaceDetailScreenState();
@@ -11,9 +35,100 @@ class PlaceDetailScreen extends StatefulWidget {
 
 class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   bool _saved = false;
+  SpotDetail? _spot;
+  bool _failed = false;
+  bool _reviewed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load(reportVisit: true);
+  }
+
+  Future<void> _load({required bool reportVisit}) async {
+    if (_failed) setState(() => _failed = false);
+    final watch = Stopwatch()..start();
+    try {
+      final spot = await widget.repository.fetchSpot(widget.spotId);
+      if (reportVisit) _report(watch.elapsedMilliseconds, httpStatus: 200);
+      if (mounted) setState(() => _spot = spot);
+    } on Object catch (e) {
+      if (reportVisit) _report(watch.elapsedMilliseconds, error: e);
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  void _report(int durationMs, {int? httpStatus, Object? error}) {
+    widget.telemetry.enqueue(TelemetryEvent.restaurantDetail(
+      spotId: widget.spotId,
+      userId: widget.currentUserId(),
+      durationMs: durationMs,
+      success: error == null,
+      httpStatus: error is ApiException ? error.statusCode : httpStatus,
+      errorType: error == null ? null : _errorType(error),
+    ));
+  }
+
+  /// Same categories as the Kotlin app, so BQ2 can compare both apps.
+  static String _errorType(Object e) => switch (e) {
+        ApiException(:final statusCode) => 'HTTP_$statusCode',
+        TimeoutException() => 'TIMEOUT',
+        SocketException() => 'NO_CONNECTION',
+        FormatException() || TypeError() => 'PARSE_ERROR',
+        http.ClientException() => 'NETWORK_ERROR',
+        _ => 'UNKNOWN',
+      };
+
+  Future<void> _writeReview(SpotDetail spot) async {
+    final result = await Navigator.push<ReviewResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WriteReviewScreen(
+          spotId: spot.id,
+          spotName: spot.name,
+          repository: widget.repository,
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _reviewed = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Thanks! Your review was published.')),
+    );
+    _load(reportVisit: false);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final spot = _spot;
+    if (spot == null) {
+      return Scaffold(
+        backgroundColor: AppColors.cream,
+        appBar: AppBar(backgroundColor: AppColors.cream, foregroundColor: AppColors.espresso, elevation: 0),
+        body: Center(
+          child: _failed
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      "Couldn't load this place.",
+                      style: TextStyle(fontSize: 15, color: AppColors.espresso),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => _load(reportVisit: true),
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                )
+              : const CircularProgressIndicator(color: AppColors.tomato),
+        ),
+      );
+    }
+    return _buildPage(spot);
+  }
+
+  Widget _buildPage(SpotDetail spot) {
     return Scaffold(
       backgroundColor: AppColors.cream,
       body: SafeArea(
@@ -29,13 +144,13 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.arrow_back, color: AppColors.espresso),
                   ),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      _name,
+                      spot.name,
                       textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
                         color: AppColors.espresso,
@@ -68,17 +183,17 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                       Positioned.fill(
                         child: Container(
                           decoration: BoxDecoration(
-                            color: _emojiBackground,
+                            color: spot.emojiBackground,
                             borderRadius: BorderRadius.circular(20),
                           ),
                           alignment: Alignment.center,
-                          child: const Text(_emoji, style: TextStyle(fontSize: 72)),
+                          child: Text(spot.emoji, style: const TextStyle(fontSize: 72)),
                         ),
                       ),
-                      const Positioned(
+                      Positioned(
                         left: 12,
                         top: 12,
-                        child: _TomatoPill(label: '$_affinity% Taste Match'),
+                        child: _TomatoPill(label: '${spot.affinityPercent}% Taste Match'),
                       ),
                       Positioned(
                         right: 12,
@@ -94,16 +209,16 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                             children: [
                               const Icon(Icons.star, size: 14, color: AppColors.tomato),
                               const SizedBox(width: 4),
-                              const Text(
-                                '$_rating',
-                                style: TextStyle(
+                              Text(
+                                spot.rating.toStringAsFixed(1),
+                                style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w700,
                                   color: AppColors.espresso,
                                 ),
                               ),
                               Text(
-                                ' ($_totalReviews)',
+                                ' (${spot.totalReviews})',
                                 style: const TextStyle(fontSize: 12, color: AppColors.muted),
                               ),
                             ],
@@ -115,7 +230,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                         bottom: 12,
                         child: Row(
                           children: [
-                            if (_acceptsCampusCard)
+                            if (spot.uniCardPerk != null)
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
@@ -138,8 +253,8 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                                   ],
                                 ),
                               ),
-                            if (_acceptsCampusCard) const SizedBox(width: 8),
-                            if (_veggieFriendly)
+                            if (spot.uniCardPerk != null) const SizedBox(width: 8),
+                            if (spot.isVegetarian)
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
@@ -164,10 +279,10 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        _name,
-                        style: TextStyle(
+                        spot.name,
+                        style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.w800,
                           color: AppColors.espresso,
@@ -200,30 +315,30 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text(
-                  _subtitle,
-                  style: TextStyle(fontSize: 13, color: AppColors.muted),
+                Text(
+                  spot.subtitle,
+                  style: const TextStyle(fontSize: 13, color: AppColors.muted),
                 ),
                 const SizedBox(height: 16),
                 Row(
-                  children: const [
+                  children: [
                     Expanded(
-                      child: _StatTile(icon: Icons.directions_walk, label: 'Distance', value: _distanceLabel),
+                      child: _StatTile(icon: Icons.directions_walk, label: 'Distance', value: spot.distance),
                     ),
-                    SizedBox(width: 10),
-                    Expanded(
+                    const SizedBox(width: 10),
+                    const Expanded(
                       child: _StatTile(icon: Icons.access_time, label: 'Wait Time', value: _waitTimeLabel),
                     ),
                   ],
                 ),
                 const SizedBox(height: 10),
                 Row(
-                  children: const [
+                  children: [
                     Expanded(
-                      child: _StatTile(icon: Icons.attach_money, label: 'Price Range', value: _priceRangeLabel),
+                      child: _StatTile(icon: Icons.attach_money, label: 'Price Range', value: spot.price),
                     ),
-                    SizedBox(width: 10),
-                    Expanded(
+                    const SizedBox(width: 10),
+                    const Expanded(
                       child: _StatTile(icon: Icons.calendar_today, label: 'Hours Today', value: _hoursTodayLabel),
                     ),
                   ],
@@ -247,9 +362,9 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
-                        _whyItFits,
-                        style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.espresso),
+                      Text(
+                        spot.note,
+                        style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.espresso),
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -277,17 +392,17 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
-                const Center(
-                  child: Text(
-                    'Scroll down for Campus Menu & Reviews',
-                    style: TextStyle(fontSize: 12, color: AppColors.muted),
-                  ),
+                const SizedBox(height: 24),
+                _ReviewsHeader(
+                  totalReviews: spot.totalReviews,
+                  onWrite: widget.canReview && !_reviewed ? () => _writeReview(spot) : null,
+                  hint: widget.canReview ? null : 'Sign in with an account to leave a review.',
                 ),
-                const SizedBox(height: 4),
-                const Center(
-                  child: Icon(Icons.keyboard_arrow_down, color: AppColors.muted),
-                ),
+                const SizedBox(height: 10),
+                for (final review in spot.reviews) ...[
+                  _ReviewCard(review: review),
+                  const SizedBox(height: 10),
+                ],
               ],
             ),
           ),
@@ -312,12 +427,12 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.explore_outlined, color: Colors.white),
-                  SizedBox(width: 8),
+                children: [
+                  const Icon(Icons.explore_outlined, color: Colors.white),
+                  const SizedBox(width: 8),
                   Text(
-                    'Get Walking Directions ($_walkMinutes min)',
-                    style: TextStyle(
+                    'Get Walking Directions (${spot.walkMinutes} min)',
+                    style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
                       color: Colors.white,
@@ -328,6 +443,102 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ReviewsHeader extends StatelessWidget {
+  final int totalReviews;
+  final VoidCallback? onWrite;
+  final String? hint;
+
+  const _ReviewsHeader({required this.totalReviews, required this.onWrite, this.hint});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Student Reviews ($totalReviews)',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.espresso,
+                ),
+              ),
+            ),
+            if (onWrite != null)
+              TextButton.icon(
+                onPressed: onWrite,
+                icon: const Icon(Icons.rate_review_outlined, size: 18, color: AppColors.tomato),
+                label: const Text(
+                  'Rate it',
+                  style: TextStyle(color: AppColors.tomato, fontWeight: FontWeight.w700),
+                ),
+              ),
+          ],
+        ),
+        if (hint != null)
+          Text(hint!, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+      ],
+    );
+  }
+}
+
+class _ReviewCard extends StatelessWidget {
+  final SpotReview review;
+
+  const _ReviewCard({required this.review});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _Avatar(review.initials),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  review.authorName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.espresso,
+                  ),
+                ),
+              ),
+              for (var i = 1; i <= 5; i++)
+                Icon(
+                  i <= review.stars ? Icons.star_rounded : Icons.star_outline_rounded,
+                  size: 14,
+                  color: AppColors.tomato,
+                ),
+            ],
+          ),
+          if (review.text.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              review.text,
+              style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.espresso),
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(review.dinedAgo, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+        ],
       ),
     );
   }
@@ -414,22 +625,7 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-const _emoji = '🍔';
-const _emojiBackground = AppColors.tomatoLight;
-const _name = 'La Esquina Burger Lab';
-const _subtitle = 'Artisanal Smash Burgers • Craft Sauces • Student Perks';
-const _affinity = 98;
-const _rating = 4.8;
-const _totalReviews = 142;
-const _distanceLabel = '180m (3 min walk)';
+// Not served by the backend yet (wait times are BQ4, still unassigned).
 const _waitTimeLabel = '8-12 min';
-const _priceRangeLabel = '\$16k - \$22k COP';
 const _hoursTodayLabel = '11:00 AM - 7:30 PM';
 const _isOpenNow = true;
-const _acceptsCampusCard = true;
-const _veggieFriendly = true;
-const _walkMinutes = 3;
-const _whyItFits =
-    'Based on 47 students in Engineering & Tech with Vegetarian and '
-    'Artisanal Burger preferences: 96% rated value-for-money 5/5, and 92% '
-    'praised the garlic sauce and rapid turnaround between class blocks.';

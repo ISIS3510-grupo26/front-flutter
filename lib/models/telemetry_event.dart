@@ -9,6 +9,8 @@ class TelemetryEvent {
   final String? userId;
   final int durationMs;
   final bool success;
+  final int? httpStatus;
+  final String? errorType;
   final DateTime occurredAt;
 
   /// BQ7: [userId] saved [spotId]. The backend rejects the whole batch if a
@@ -20,6 +22,19 @@ class TelemetryEvent {
         screen = 'favorite_added',
         durationMs = 0,
         success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = DateTime.now().toUtc();
+
+  TelemetryEvent.restaurantDetail({
+    required String this.spotId,
+    required this.durationMs,
+    required this.success,
+    this.userId,
+    this.httpStatus,
+    this.errorType,
+  })  : eventId = _newEventId(),
+        screen = 'restaurant_detail',
         occurredAt = DateTime.now().toUtc();
 
   Map<String, dynamic> toJson() => {
@@ -29,6 +44,8 @@ class TelemetryEvent {
         'userId': userId,
         'durationMs': durationMs,
         'success': success,
+        if (httpStatus != null) 'httpStatus': httpStatus,
+        if (errorType != null) 'errorType': errorType,
         'occurredAt': occurredAt.toIso8601String(),
       };
 

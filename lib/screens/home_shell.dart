@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../repositories/favorites_repository.dart';
 import '../repositories/recommendations_repository.dart';
+import '../repositories/spots_repository.dart';
 import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/favorites_controller.dart';
@@ -10,7 +11,9 @@ import '../services/taste_map_loader.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
+import 'change_password_screen.dart';
 import 'for_you_screen.dart';
+import 'place_detail_screen.dart';
 import 'saved_places_screen.dart';
 import 'taste_map_screen.dart';
 import 'profile_screen.dart';
@@ -33,6 +36,7 @@ class _HomeShellState extends State<HomeShell> {
 
   late final _http = AuthClient(widget.session);
   late final _api = FavoritesRepository(client: _http);
+  late final _spots = SpotsRepository(client: _http);
   late final _telemetry = TelemetryQueue(client: _http);
   late final _favorites = FavoritesController(
     repository: _api,
@@ -79,6 +83,28 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
+  void _openSpot(String id) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PlaceDetailScreen(
+          spotId: id,
+          repository: _spots,
+          telemetry: _telemetry,
+          currentUserId: () => widget.session.userId,
+          canReview: widget.session.state is AuthSignedIn,
+        ),
+      ),
+    );
+  }
+
+  void _openChangePassword() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ChangePasswordScreen(session: widget.session)),
+    );
+  }
+
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -95,14 +121,23 @@ class _HomeShellState extends State<HomeShell> {
         builder: (context, _) => IndexedStack(
           index: _index,
           children: [
-            ForYouScreen(spots: _favorites.spots, onToggleSaved: _toggleSaved),
-            TasteMapScreen(loader: _tasteMapLoader),
+            ForYouScreen(
+              spots: _favorites.spots,
+              onToggleSaved: _toggleSaved,
+              onOpenSpot: _openSpot,
+            ),
+            TasteMapScreen(loader: _tasteMapLoader, onOpenSpot: _openSpot),
             SavedPlacesScreen(
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,
               nearbyLoader: _nearbyLoader,
+              onOpenSpot: _openSpot,
             ),
-            ProfileScreen(onSignOut: widget.session.signOut),
+            ProfileScreen(
+              onSignOut: widget.session.signOut,
+              onChangePassword:
+                  widget.session.state is AuthSignedIn ? _openChangePassword : null,
+            ),
           ],
         ),
       ),

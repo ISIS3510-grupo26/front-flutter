@@ -8,11 +8,13 @@ import '../widgets/spot_card.dart';
 class ForYouScreen extends StatefulWidget {
   final List<Spot> spots;
   final ValueChanged<String> onToggleSaved;
+  final ValueChanged<String>? onOpenSpot;
 
   const ForYouScreen({
     super.key,
     required this.spots,
     required this.onToggleSaved,
+    this.onOpenSpot,
   });
 
   @override
@@ -121,6 +123,7 @@ class _ForYouScreenState extends State<ForYouScreen> {
                   return SpotCard(
                     spot: spot,
                     onToggleSaved: () => widget.onToggleSaved(spot.id),
+                  onTap: widget.onOpenSpot == null ? null : () => widget.onOpenSpot!(spot.id),
                   );
                 },
               ),
