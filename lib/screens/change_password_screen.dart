@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import '../repositories/api_exception.dart';
 import '../services/auth_session.dart';
+import '../services/password_rules.dart';
 import '../theme/app_colors.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
@@ -33,8 +32,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   /// Valida los campos de contraseña. Devuelve un mensaje de error si hay un problema, o null si todo está bien.
   String? _validate(String current, String next, String confirm) {
     if (current.isEmpty) return 'Enter your current password.';
-    final bytes = utf8.encode(next).length;
-    if (bytes < 8 || bytes > 72) return 'Use a new password between 8 and 72 characters.';
+    if (passwordProblem(next) case final problem?) return problem;
     if (next != confirm) return "The new passwords don't match.";
     if (next == current) return 'The new password must be different from the current one.';
     return null;
@@ -59,7 +57,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       _fail(switch (e.statusCode) {
         400 => 'Your current password is incorrect.',
         401 => 'Your session expired. Sign in again.',
-        422 => 'Use a new password between 8 and 72 characters.',
+        422 => 'Use a new password between 8 and 128 characters.',
         _ => 'Something went wrong on our side. Try again.',
       });
     } on Exception {
@@ -115,7 +113,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                   obscureText: true,
                   autofillHints: const [AutofillHints.newPassword],
                   textInputAction: TextInputAction.next,
-                  decoration: _fieldDecoration('New password', helper: 'At least 8 characters'),
+                  decoration: _fieldDecoration('New password', helper: '8 to 128 characters'),
                 ),
                 const SizedBox(height: 12),
                 TextField(

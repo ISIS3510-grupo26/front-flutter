@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import '../repositories/api_exception.dart';
 import '../services/auth_session.dart';
+import '../services/password_rules.dart';
 import '../theme/app_colors.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -31,9 +30,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String? _validate(String email, String password) {
     if (!email.contains('@')) return 'Enter a valid email address.';
-    final bytes = utf8.encode(password).length;
-    if (_creatingAccount && (bytes < 8 || bytes > 72)) {
-      return 'Use a password between 8 and 72 characters.';
+    if (_creatingAccount) {
+      if (passwordProblem(password) case final problem?) return problem;
     }
     if (password.isEmpty) return 'Enter your password.';
     return null;
@@ -57,7 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _fail(switch (e.statusCode) {
         409 => 'That email is already in use. Try signing in instead.',
         401 => 'Incorrect email or password.',
-        422 => 'Enter a valid email and a password of 8 to 72 characters.',
+        422 => 'Enter a valid email and a password of 8 to 128 characters.',
         _ => 'Something went wrong on our side. Try again.',
       });
     } on Exception {
@@ -131,7 +129,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     onSubmitted: (_) => _submit(),
                     decoration: _fieldDecoration(
                       'Password',
-                      helper: _creatingAccount ? 'At least 8 characters' : null,
+                      helper: _creatingAccount ? '8 to 128 characters' : null,
                     ),
                   ),
                   if (_error case final error?) ...[
