@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/nearby_pick.dart';
+import '../services/cached_tile_provider.dart';
 import '../services/taste_map_loader.dart';
 import '../theme/app_colors.dart';
 
@@ -27,9 +28,9 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     setState(() => _state = const TasteMapLoading());
-    final state = await widget.loader.load();
+    final state = await widget.loader.load(forceRefresh: forceRefresh);
     if (!mounted) return;
     setState(() {
       _state = state;
@@ -105,7 +106,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                   child: CircularProgressIndicator(color: AppColors.tomato),
                 ),
               TasteMapFailed(:final reason) =>
-                _FailedView(reason: reason, onRetry: _load),
+                _FailedView(reason: reason, onRetry: () => _load(forceRefresh: true)),
               TasteMapLoaded(:final picks, :final userLat, :final userLng, :final usedFallback) =>
                 Stack(
                   children: [
@@ -119,6 +120,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                           urlTemplate:
                               'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'com.example.campus_bites',
+                          tileProvider: CachedTileProvider(),
                         ),
                         MarkerLayer(
                           markers: [
@@ -159,7 +161,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                       top: 16,
                       right: 16,
                       child: GestureDetector(
-                        onTap: _load,
+                        onTap: () => _load(forceRefresh: true),
                         child: Container(
                           width: 44,
                           height: 44,
