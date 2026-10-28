@@ -6,8 +6,12 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/nearby_pick.dart';
+import '../models/telemetry_event.dart';
 import '../services/cached_tile_provider.dart';
+import '../services/map_display_event.dart';
+import '../services/map_event_outbox.dart';
 import '../services/taste_map_loader.dart';
+import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
 import '../widgets/offline_banner.dart';
 
@@ -16,7 +20,21 @@ class TasteMapScreen extends StatefulWidget {
 
   final ValueChanged<String>? onOpenSpot;
 
-  const TasteMapScreen({super.key, required this.loader, this.onOpenSpot});
+  /// BQ14 map_display events go here while online.
+  final TelemetryQueue telemetry;
+  final String? Function() currentUserId;
+
+  /// BQ14 map_display events go here while offline.
+  final MapEventOutbox outbox;
+
+  const TasteMapScreen({
+    super.key,
+    required this.loader,
+    required this.telemetry,
+    required this.currentUserId,
+    this.onOpenSpot,
+    this.outbox = const MapEventOutbox(),
+  });
 
   @override
   State<TasteMapScreen> createState() => _TasteMapScreenState();
@@ -26,11 +44,25 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   TasteMapState _state = const TasteMapLoading();
   int _selected = 0;
   late final StreamSubscription<List<ConnectivityResult>> _connectivity;
+  bool _online = true;
+
+  /// Measures the current load, for the BQ14 events.
+  final _loadWatch = Stopwatch();
+
+  /// At most one 'tiles_failed' event per load (and none for cached loads).
+  bool _tilesFailedReported = false;
 
   @override
   void initState() {
     super.initState();
     _connectivity = Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
+    Connectivity()
+        .checkConnectivity()
+        .then((results) {
+          _online = _isOnline(results);
+        })
+        .catchError((Object e) => debugPrint("Couldn't check connectivity: $e"));
+    _forwardSavedEvents();
     _load();
   }
 
@@ -44,7 +76,9 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   /// listens to connectivity changes and, when the connection comes back
   /// while it shows offline picks or a network error, reloads by itself.
   void _onConnectivityChanged(List<ConnectivityResult> results) {
-    final online = results.any((r) => r != ConnectivityResult.none);
+    final online = _isOnline(results);
+    _online = online;
+    if (online) _forwardSavedEvents();
     final showingOffline = switch (_state) {
       TasteMapLoaded(:final offlineSavedAt) => offlineSavedAt != null,
       TasteMapFailed(reason: TasteMapFailure.network) => true,
@@ -53,14 +87,75 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
     if (online && showingOffline) _load(forceRefresh: true);
   }
 
+  static bool _isOnline(List<ConnectivityResult> results) =>
+      results.any((r) => r != ConnectivityResult.none);
+
   Future<void> _load({bool forceRefresh = false}) async {
     setState(() => _state = const TasteMapLoading());
+    _loadWatch
+      ..reset()
+      ..start();
     final state = await widget.loader.load(forceRefresh: forceRefresh);
     if (!mounted) return;
+    _reportMapDisplay(state);
     setState(() {
       _state = state;
       _selected = 0;
     });
+  }
+
+  /// BQ14: one map_display event per load. Loads served from the LRU cache
+  /// send nothing: they were already reported when they came from the network.
+  void _reportMapDisplay(TasteMapState state) {
+    if (state is TasteMapLoaded && state.fromCache) {
+      _tilesFailedReported = true;
+      return;
+    }
+    _tilesFailedReported = false;
+    final errorType = mapDisplayErrorType(state);
+    _send(TelemetryEvent.mapDisplay(
+      userId: widget.currentUserId(),
+      success: errorType == null,
+      errorType: errorType,
+      durationMs: _loadWatch.elapsedMilliseconds,
+    ));
+  }
+
+  /// TileLayer.errorTileCallback: the map images failed (at most once per load).
+  void _reportTilesFailed() {
+    if (_tilesFailedReported) return;
+    _tilesFailedReported = true;
+    _send(TelemetryEvent.mapDisplay(
+      userId: widget.currentUserId(),
+      success: false,
+      errorType: 'tiles_failed',
+      durationMs: _loadWatch.elapsedMilliseconds,
+    ));
+  }
+
+  /// Online, the event goes to the TelemetryQueue. Offline, it is appended to
+  /// the file outbox. Future with handler: the write is fire-and-forget with
+  /// .then()/.catchError(), so the map never waits for the disk; if the write
+  /// fails the event still goes to the in-memory queue.
+  void _send(TelemetryEvent event) {
+    if (_online) return widget.telemetry.enqueue(event);
+    widget.outbox
+        .append(event)
+        .then((_) => debugPrint('BQ14 event saved offline'))
+        .catchError((Object e) {
+      debugPrint("Couldn't save the BQ14 event offline: $e");
+      widget.telemetry.enqueue(event);
+    });
+  }
+
+  /// Store and forward: moves the events saved offline to the TelemetryQueue.
+  /// Future with handler, fire-and-forget.
+  void _forwardSavedEvents() {
+    widget.outbox
+        .forwardTo(widget.telemetry)
+        .then((count) {
+      if (count > 0) debugPrint('Forwarded $count BQ14 events saved offline');
+    }).catchError((Object e) => debugPrint("Couldn't forward BQ14 events: $e"));
   }
 
   @override
@@ -152,6 +247,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                               'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                           userAgentPackageName: 'com.example.campus_bites',
                           tileProvider: CachedTileProvider(),
+                          errorTileCallback: (_, _, _) => _reportTilesFailed(),
                         ),
                         MarkerLayer(
                           markers: [
@@ -168,22 +264,25 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                               ),
                             ),
                             for (var i = 0; i < picks.length; i++)
-                              Marker(
-                                point: LatLng(
-                                  picks[i].latitude,
-                                  picks[i].longitude,
+                              // A pin with impossible coordinates is not
+                              // drawn (BQ14 reports it as invalid_coordinates).
+                              if (hasValidCoordinates(picks[i], userLat, userLng))
+                                Marker(
+                                  point: LatLng(
+                                    picks[i].latitude,
+                                    picks[i].longitude,
+                                  ),
+                                  // Tall enough for the selected pin, which adds
+                                  // a 3px white border on top of the base size.
+                                  width: 110,
+                                  height: 52,
+                                  alignment: Alignment.topCenter,
+                                  child: _Pin(
+                                    pick: picks[i],
+                                    selected: i == _selected,
+                                    onTap: () => setState(() => _selected = i),
+                                  ),
                                 ),
-                                // Tall enough for the selected pin, which adds
-                                // a 3px white border on top of the base size.
-                                width: 110,
-                                height: 52,
-                                alignment: Alignment.topCenter,
-                                child: _Pin(
-                                  pick: picks[i],
-                                  selected: i == _selected,
-                                  onTap: () => setState(() => _selected = i),
-                                ),
-                              ),
                           ],
                         ),
                       ],

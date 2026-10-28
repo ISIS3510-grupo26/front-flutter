@@ -130,7 +130,12 @@ class _HomeShellState extends State<HomeShell> {
               onToggleSaved: _toggleSaved,
               onOpenSpot: _openSpot,
             ),
-            TasteMapScreen(loader: _tasteMapLoader, onOpenSpot: _openSpot),
+            TasteMapScreen(
+              loader: _tasteMapLoader,
+              telemetry: _telemetry,
+              currentUserId: () => widget.session.userId,
+              onOpenSpot: _openSpot,
+            ),
             SavedPlacesScreen(
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,
