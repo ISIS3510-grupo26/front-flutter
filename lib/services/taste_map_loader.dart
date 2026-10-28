@@ -1,7 +1,11 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/nearby_pick.dart';
+import 'local_database.dart';
 import 'lru_cache.dart';
 import 'location_service.dart';
 import 'recommendations_service_adapter.dart';
+import 'taste_map_prefs.dart';
 
 enum TasteMapFailure { signedOut, network }
 
@@ -31,12 +35,17 @@ final class TasteMapLoaded extends TasteMapState {
   /// True when the picks came from the LRU cache instead of the network.
   final bool fromCache;
 
+  /// Set when the network failed and these are the picks saved on the phone
+  /// at that time; null when they are fresh.
+  final DateTime? offlineSavedAt;
+
   const TasteMapLoaded({
     required this.picks,
     required this.userLat,
     required this.userLng,
     required this.usedFallback,
     this.fromCache = false,
+    this.offlineSavedAt,
   });
 }
 
@@ -51,11 +60,15 @@ class TasteMapLoader {
   final RecommendationsService _recommendations;
   final String? Function() _currentUserId;
   final LruCache<String, List<NearbyPick>> _cache;
+  final TasteMapStorage _storage;
+  final TasteMapPrefs _prefs;
 
   TasteMapLoader({
     this._location = const LocationService(),
     required this._recommendations,
     required this._currentUserId,
+    required this._storage,
+    required this._prefs,
     LruCache<String, List<NearbyPick>>? cache,
   }) : _cache = cache ?? LruCache(capacity: 8, ttl: const Duration(minutes: 5));
 
@@ -103,6 +116,7 @@ class TasteMapLoader {
         lng: lng,
       );
       _cache.put(key, picks);
+      _saveForOffline(picks, lat, lng);
       return TasteMapLoaded(
         picks: picks,
         userLat: lat,
@@ -110,7 +124,40 @@ class TasteMapLoader {
         usedFallback: usedFallback,
       );
     } catch (_) {
-      return const TasteMapFailed(TasteMapFailure.network);
+      return _loadSaved();
     }
+  }
+
+  /// Multithreading strategy: Future with handler. Saving for offline use is
+  /// fire-and-forget with .then()/.catchError(): the map shows the picks
+  /// right away and never waits for the disk. If a write fails, only the
+  /// offline copy is lost.
+  void _saveForOffline(List<NearbyPick> picks, double lat, double lng) {
+    _storage
+        .savePicks(picks)
+        .then((_) => _prefs.save(syncedAt: DateTime.now(), lat: lat, lng: lng))
+        .catchError((Object e) => debugPrint("Couldn't save the Taste Map offline: $e"));
+  }
+
+  /// Eventual connectivity: without network, the last picks saved in SQLite,
+  /// centered where the student was (preferences). Only with nothing saved
+  /// is it a network failure.
+  Future<TasteMapState> _loadSaved() async {
+    try {
+      final picks = await _storage.readPicks();
+      final last = await _prefs.read();
+      if (picks.isNotEmpty && last != null) {
+        return TasteMapLoaded(
+          picks: picks,
+          userLat: last.lat,
+          userLng: last.lng,
+          usedFallback: false,
+          offlineSavedAt: last.syncedAt,
+        );
+      }
+    } catch (e) {
+      debugPrint("Couldn't read the offline Taste Map: $e");
+    }
+    return const TasteMapFailed(TasteMapFailure.network);
   }
 }

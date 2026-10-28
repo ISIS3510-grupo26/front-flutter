@@ -1,9 +1,11 @@
 import 'package:campus_bites/models/nearby_pick.dart';
 import 'package:campus_bites/repositories/api_exception.dart';
+import 'package:campus_bites/services/local_database.dart';
 import 'package:campus_bites/services/location_service.dart';
 import 'package:campus_bites/services/lru_cache.dart';
 import 'package:campus_bites/services/recommendations_service_adapter.dart';
 import 'package:campus_bites/services/taste_map_loader.dart';
+import 'package:campus_bites/services/taste_map_prefs.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -66,6 +68,30 @@ class _FakeRecommendations implements RecommendationsService {
   }
 }
 
+class _MemoryPicks implements TasteMapStorage {
+  List<NearbyPick> picks = [];
+
+  @override
+  Future<void> savePicks(List<NearbyPick> picks) async => this.picks = picks;
+
+  @override
+  Future<List<NearbyPick>> readPicks() async => picks;
+}
+
+class _MemoryPrefs extends Fake implements TasteMapPrefs {
+  ({DateTime syncedAt, double lat, double lng})? last;
+
+  @override
+  Future<void> save({
+    required DateTime syncedAt,
+    required double lat,
+    required double lng,
+  }) async => last = (syncedAt: syncedAt, lat: lat, lng: lng);
+
+  @override
+  Future<({DateTime syncedAt, double lat, double lng})?> read() async => last;
+}
+
 void main() {
   test('returns the picks for the device position', () async {
     final recommendations = _FakeRecommendations();
@@ -73,6 +99,8 @@ void main() {
       location: const _FakeLocation(),
       recommendations: recommendations,
       currentUserId: () => 'u1',
+      storage: _MemoryPicks(),
+      prefs: _MemoryPrefs(),
     );
 
     final state = await loader.load();
@@ -92,6 +120,8 @@ void main() {
       location: const _FakeLocation(failure: LocationFailure.permissionDenied),
       recommendations: recommendations,
       currentUserId: () => 'u1',
+      storage: _MemoryPicks(),
+      prefs: _MemoryPrefs(),
     );
 
     final loaded = await loader.load() as TasteMapLoaded;
@@ -108,10 +138,74 @@ void main() {
       location: const _FakeLocation(),
       recommendations: _FakeRecommendations(),
       currentUserId: () => null,
+      storage: _MemoryPicks(),
+      prefs: _MemoryPrefs(),
     );
 
     final state = await loader.load();
     expect((state as TasteMapFailed).reason, TasteMapFailure.signedOut);
+  });
+
+  group('offline', () {
+    late _FakeRecommendations recommendations;
+    late _MemoryPicks storage;
+    late _MemoryPrefs prefs;
+    late TasteMapLoader loader;
+
+    setUp(() {
+      recommendations = _FakeRecommendations();
+      storage = _MemoryPicks();
+      prefs = _MemoryPrefs();
+      loader = TasteMapLoader(
+        location: const _FakeLocation(),
+        recommendations: recommendations,
+        currentUserId: () => 'u1',
+        storage: storage,
+        prefs: prefs,
+      );
+    });
+
+    test('a successful load saves the picks and where they were loaded', () async {
+      final loaded = await loader.load() as TasteMapLoaded;
+      await pumpEventQueue();
+
+      expect(loaded.offlineSavedAt, isNull);
+      expect(storage.picks.single.id, 'nitro-coffee');
+      expect((prefs.last!.lat, prefs.last!.lng), (4.65, -74.05));
+    });
+
+    test('without network it shows the saved picks and when they were saved', () async {
+      final savedAt = DateTime(2026, 10, 27, 9, 30);
+      storage.picks = const [
+        NearbyPick(
+          id: 'green-bowl-co',
+          name: 'Green Bowl Co.',
+          emoji: '🥗',
+          rating: 4.8,
+          latitude: 4.6025,
+          longitude: -74.0650,
+          distanceMeters: 120,
+          walkMinutes: 2,
+        ),
+      ];
+      prefs.last = (syncedAt: savedAt, lat: 4.6018, lng: -74.0661);
+      recommendations.error = const ApiException(503);
+
+      final offline = await loader.load() as TasteMapLoaded;
+
+      expect(offline.offlineSavedAt, savedAt);
+      expect(offline.picks.single.id, 'green-bowl-co');
+      expect((offline.userLat, offline.userLng), (4.6018, -74.0661));
+      expect(offline.fromCache, isFalse);
+    });
+
+    test('without network and nothing saved it is a network failure', () async {
+      recommendations.error = const ApiException(503);
+
+      final state = await loader.load();
+
+      expect((state as TasteMapFailed).reason, TasteMapFailure.network);
+    });
   });
 
   test('reports a network failure when the API call fails', () async {
@@ -119,6 +213,8 @@ void main() {
       location: const _FakeLocation(),
       recommendations: _FakeRecommendations(error: const ApiException(500)),
       currentUserId: () => 'u1',
+      storage: _MemoryPicks(),
+      prefs: _MemoryPrefs(),
     );
 
     final state = await loader.load();
@@ -137,6 +233,8 @@ void main() {
         location: const _FakeLocation(),
         recommendations: recommendations,
         currentUserId: () => 'u1',
+        storage: _MemoryPicks(),
+        prefs: _MemoryPrefs(),
         cache: LruCache(capacity: 8, ttl: const Duration(minutes: 5), now: () => now),
       );
     });

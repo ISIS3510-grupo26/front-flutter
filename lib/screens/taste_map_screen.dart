@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -6,6 +9,7 @@ import '../models/nearby_pick.dart';
 import '../services/cached_tile_provider.dart';
 import '../services/taste_map_loader.dart';
 import '../theme/app_colors.dart';
+import '../widgets/offline_banner.dart';
 
 class TasteMapScreen extends StatefulWidget {
   final TasteMapLoader loader;
@@ -21,11 +25,32 @@ class TasteMapScreen extends StatefulWidget {
 class _TasteMapScreenState extends State<TasteMapScreen> {
   TasteMapState _state = const TasteMapLoading();
   int _selected = 0;
+  late final StreamSubscription<List<ConnectivityResult>> _connectivity;
 
   @override
   void initState() {
     super.initState();
+    _connectivity = Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _connectivity.cancel();
+    super.dispose();
+  }
+
+  /// Multithreading strategy: Stream. Eventual connectivity: the screen
+  /// listens to connectivity changes and, when the connection comes back
+  /// while it shows offline picks or a network error, reloads by itself.
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    final online = results.any((r) => r != ConnectivityResult.none);
+    final showingOffline = switch (_state) {
+      TasteMapLoaded(:final offlineSavedAt) => offlineSavedAt != null,
+      TasteMapFailed(reason: TasteMapFailure.network) => true,
+      _ => false,
+    };
+    if (online && showingOffline) _load(forceRefresh: true);
   }
 
   Future<void> _load({bool forceRefresh = false}) async {
@@ -107,7 +132,13 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                 ),
               TasteMapFailed(:final reason) =>
                 _FailedView(reason: reason, onRetry: () => _load(forceRefresh: true)),
-              TasteMapLoaded(:final picks, :final userLat, :final userLng, :final usedFallback) =>
+              TasteMapLoaded(
+                :final picks,
+                :final userLat,
+                :final userLng,
+                :final usedFallback,
+                :final offlineSavedAt,
+              ) =>
                 Stack(
                   children: [
                     FlutterMap(
@@ -174,7 +205,19 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                         ),
                       ),
                     ),
-                    if (usedFallback)
+                    if (offlineSavedAt != null)
+                      Positioned(
+                        left: 16,
+                        top: 16,
+                        right: 72,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: OfflineBanner(
+                            message: 'Offline · showing your last picks from ${hourMinute(offlineSavedAt)}',
+                          ),
+                        ),
+                      )
+                    else if (usedFallback)
                       const Positioned(
                         left: 16,
                         top: 16,

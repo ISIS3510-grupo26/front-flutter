@@ -5,9 +5,11 @@ import '../repositories/spots_repository.dart';
 import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/favorites_controller.dart';
+import '../services/local_database.dart';
 import '../services/nearby_favorites_loader.dart';
 import '../services/recommendations_service_adapter.dart';
 import '../services/taste_map_loader.dart';
+import '../services/taste_map_prefs.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
@@ -51,6 +53,8 @@ class _HomeShellState extends State<HomeShell> {
   late final _tasteMapLoader = TasteMapLoader(
     recommendations: _recommendations,
     currentUserId: () => widget.session.userId,
+    storage: const SqliteTasteMapStorage(),
+    prefs: TasteMapPrefs(),
   );
 
   @override

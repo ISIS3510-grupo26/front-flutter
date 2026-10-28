@@ -57,6 +57,30 @@ class SpotDetail {
         ],
       );
 
+  /// The same keys [SpotDetail.fromJson] reads, so a saved page can be read
+  /// back offline.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'emoji': emoji,
+        'emojiBackground': _hexString(emojiBackground),
+        'name': name,
+        'subtitle': subtitle,
+        'rating': rating,
+        'totalReviews': totalReviews,
+        'price': price,
+        'distance': distance,
+        'walkMinutes': walkMinutes,
+        'isVegetarian': isVegetarian,
+        'affinityPercent': affinityPercent,
+        'note': note,
+        'uniCardPerk': uniCardPerk,
+        'reviews': [for (final r in reviews) r.toJson()],
+      };
+
+  /// Color(0xFFFFFBEB) -> '#FFFBEB'
+  static String _hexString(Color color) =>
+      '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
   /// '#FFFBEB' -> Color(0xFFFFFBEB)
   static Color _hexColor(String hex) =>
       Color(int.parse(hex.replaceFirst('#', ''), radix: 16) | 0xFF000000);
@@ -84,6 +108,14 @@ class SpotReview {
         text: json['text'] as String,
         dinedAgo: json['dinedAgo'] as String,
       );
+
+  Map<String, dynamic> toJson() => {
+        'authorName': authorName,
+        'initials': initials,
+        'stars': stars,
+        'text': text,
+        'dinedAgo': dinedAgo,
+      };
 }
 
 /// `POST /spots/{id}/reviews` devuelve la nueva media del restaurante.
