@@ -1,6 +1,6 @@
 import '../models/nearby_pick.dart';
-import '../repositories/recommendations_repository.dart';
 import 'location_service.dart';
+import 'recommendations_service_adapter.dart';
 
 enum TasteMapFailure { signedOut, network }
 
@@ -43,7 +43,7 @@ class TasteMapLoader {
   static const campusLng = -74.0661;
 
   final LocationService _location;
-  final RecommendationsRepository _recommendations;
+  final RecommendationsService _recommendations;
   final String? Function() _currentUserId;
 
   TasteMapLoader({
@@ -68,7 +68,7 @@ class TasteMapLoader {
     }
 
     try {
-      final picks = await _recommendations.fetchNearbyPicks(
+      final picks = await _recommendations.nearbyPicks(
         userId: userId,
         lat: lat,
         lng: lng,

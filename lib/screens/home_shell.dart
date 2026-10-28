@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../repositories/favorites_repository.dart';
-import '../repositories/recommendations_repository.dart';
 import '../repositories/spots_repository.dart';
 import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/favorites_controller.dart';
 import '../services/nearby_favorites_loader.dart';
+import '../services/recommendations_service_adapter.dart';
 import '../services/taste_map_loader.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
@@ -47,7 +47,7 @@ class _HomeShellState extends State<HomeShell> {
     favorites: _api,
     currentUserId: () => widget.session.userId,
   );
-  late final _recommendations = RecommendationsRepository(client: _http);
+  late final _recommendations = RecommendationsServiceAdapter(client: _http);
   late final _tasteMapLoader = TasteMapLoader(
     recommendations: _recommendations,
     currentUserId: () => widget.session.userId,

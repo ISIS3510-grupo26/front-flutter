@@ -1,7 +1,7 @@
 import 'package:campus_bites/models/nearby_pick.dart';
 import 'package:campus_bites/repositories/api_exception.dart';
-import 'package:campus_bites/repositories/recommendations_repository.dart';
 import 'package:campus_bites/services/location_service.dart';
+import 'package:campus_bites/services/recommendations_service_adapter.dart';
 import 'package:campus_bites/services/taste_map_loader.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
@@ -32,7 +32,7 @@ class _FakeLocation implements LocationService {
   Future<bool> openSettings() async => true;
 }
 
-class _FakeRecommendations extends Fake implements RecommendationsRepository {
+class _FakeRecommendations implements RecommendationsService {
   final Object? error;
   double? lastLat;
   double? lastLng;
@@ -40,7 +40,7 @@ class _FakeRecommendations extends Fake implements RecommendationsRepository {
   _FakeRecommendations({this.error});
 
   @override
-  Future<List<NearbyPick>> fetchNearbyPicks({
+  Future<List<NearbyPick>> nearbyPicks({
     required String userId,
     required double lat,
     required double lng,
