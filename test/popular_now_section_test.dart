@@ -65,7 +65,7 @@ Future<void> _pump(
 }
 
 void main() {
-  testWidgets('shows each spot with its activity and reason, and opens it', (
+  testWidgets('shows the hour, each spot with its activity, and opens it', (
     tester,
   ) async {
     String? opened;
@@ -75,9 +75,13 @@ void main() {
       onOpenSpot: (id) => opened = id,
     );
 
-    expect(find.text('12 views · 1 search'), findsOneWidget);
-    expect(find.text('Popular now'), findsNWidgets(2));
-    expect(find.textContaining('13:00–14:00'), findsOneWidget);
+    expect(find.text('🔥 Popular right now · 13:00⁠–⁠14:00'), findsOneWidget);
+    expect(
+      find.text('13 views · 2 searches at this hour this week'),
+      findsOneWidget,
+    );
+    expect(find.text('👀 12 · 🔎 1'), findsOneWidget);
+    expect(find.text('#1'), findsOneWidget);
 
     await tester.tap(find.text('Nitro Coffee'));
     expect(opened, 'nitro-coffee');
@@ -110,23 +114,23 @@ void main() {
   testWidgets('an empty hour still links to the other hours', (tester) async {
     await _pump(tester, const PopularityEmpty(13));
 
-    expect(find.text('No activity yet this hour.'), findsOneWidget);
-    expect(find.textContaining('13:00–14:00'), findsOneWidget);
-    expect(find.text('See all'), findsOneWidget);
+    expect(find.text('No activity yet at this hour this week'), findsOneWidget);
+    expect(find.text('🔥 Popular right now · 13:00⁠–⁠14:00'), findsOneWidget);
+    expect(find.text('By hour'), findsOneWidget);
   });
 
-  testWidgets('See all needs a connection', (tester) async {
+  testWidgets('By hour needs a connection', (tester) async {
     await _pump(tester, const PopularityLoaded(_ranking));
-    expect(find.text('See all'), findsOneWidget);
+    expect(find.text('By hour'), findsOneWidget);
 
     await _pump(
       tester,
       PopularityLoaded(_ranking, offlineSavedAt: DateTime(2026, 10, 29, 9, 5)),
     );
-    expect(find.text('See all'), findsNothing);
+    expect(find.text('By hour'), findsNothing);
 
     await _pump(tester, const PopularityFailed(PopularityFailure.network));
-    expect(find.text('See all'), findsNothing);
+    expect(find.text('By hour'), findsNothing);
   });
 
   testWidgets('each failure has its own message', (tester) async {

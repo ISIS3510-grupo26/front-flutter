@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/spot.dart';
 import '../services/nearby_favorites_loader.dart';
 import '../theme/app_colors.dart';
+import '../widgets/count_pill.dart';
 import '../widgets/nearby_failure_view.dart';
 import '../widgets/spot_card.dart';
 
@@ -112,14 +113,14 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       children: [
-                        _FilterPill(
+                        CountPill(
                           label: 'All Saved',
                           count: saved.length,
                           active: _filter is _All,
                           onTap: () => setState(() => _filter = const _All()),
                         ),
                         const SizedBox(width: 10),
-                        _FilterPill(
+                        CountPill(
                           label: 'Open • ≤$_maxWalk min',
                           count: switch (_filter) {
                             _Nearby(state: NearbyLoaded()) => visible.length,
@@ -130,7 +131,7 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                         ),
                         for (final category in SpotCategory.values) ...[
                           const SizedBox(width: 10),
-                          _FilterPill(
+                          CountPill(
                             label: category.label,
                             count: saved.where((s) => s.category == category).length,
                             active: switch (_filter) {
@@ -197,69 +198,6 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
               ),
           },
         ],
-      ),
-    );
-  }
-}
-
-class _FilterPill extends StatelessWidget {
-  final String label;
-  final int? count;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _FilterPill({
-    required this.label,
-    required this.count,
-    required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? AppColors.tomato : AppColors.card,
-          borderRadius: BorderRadius.circular(999),
-          border: active ? null : Border.all(color: AppColors.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: active ? Colors.white : AppColors.espresso,
-              ),
-            ),
-            if (count != null) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: active
-                      ? Colors.white.withValues(alpha: 0.2)
-                      : AppColors.tomatoLight,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '$count',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: active ? Colors.white : AppColors.tomato,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
       ),
     );
   }

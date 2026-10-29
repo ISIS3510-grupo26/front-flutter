@@ -22,11 +22,9 @@ class FilterChipPill extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: active ? AppColors.tomato : AppColors.surface.withValues(alpha: 0.7),
+          color: active ? AppColors.tomato : AppColors.card,
           borderRadius: BorderRadius.circular(999),
-          border: active
-              ? null
-              : Border.all(color: AppColors.espresso.withValues(alpha: 0.1)),
+          border: active ? null : Border.all(color: AppColors.border),
         ),
         child: Text(
           label,

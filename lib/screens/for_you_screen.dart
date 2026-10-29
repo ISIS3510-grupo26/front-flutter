@@ -134,14 +134,6 @@ class _ForYouScreenState extends State<ForYouScreen> {
                 ),
               ),
             ),
-            SliverToBoxAdapter(
-              child: PopularNowSection(
-                state: _popular,
-                onRetry: _retryPopular,
-                onSeeAll: _openPopularByHour,
-                onOpenSpot: widget.onOpenSpot,
-              ),
-            ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               sliver: SliverToBoxAdapter(
@@ -167,6 +159,14 @@ class _ForYouScreenState extends State<ForYouScreen> {
                     const SizedBox(height: 4),
                   ],
                 ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: PopularNowSection(
+                state: _popular,
+                onRetry: _retryPopular,
+                onSeeAll: _openPopularByHour,
+                onOpenSpot: widget.onOpenSpot,
               ),
             ),
             if (feed.isEmpty)

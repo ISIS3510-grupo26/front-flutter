@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/hourly_ranking.dart';
+import '../models/weekday_searches.dart';
 import '../repositories/api_exception.dart';
 import 'lru_cache.dart';
 import 'popularity_prefs.dart';
@@ -54,10 +55,7 @@ final class PopularByHourLoading extends PopularByHourState {
 final class PopularByHourLoaded extends PopularByHourState {
   final PopularityReport report;
 
-  /// The phone's hour when the report was requested, to mark it as "Now".
-  final int currentHour;
-
-  const PopularByHourLoaded(this.report, {required this.currentHour});
+  const PopularByHourLoaded(this.report);
 }
 
 final class PopularByHourFailed extends PopularByHourState {
@@ -119,15 +117,23 @@ class PopularityLoader {
     }
   }
 
-  /// Every hour with activity, for the "See all" screen. Always from the
+  /// The phone's current hour, from the same clock as every load.
+  int get currentHour => _now().hour;
+
+  /// For the "Restaurant searches by weekday" card, which shows its own
+  /// loading and error states. Always from the network.
+  Future<WeekdaySearches> searchesByWeekday() => _service.searchesByWeekday(
+    tzOffsetMinutes: _now().timeZoneOffset.inMinutes,
+  );
+
+  /// Every hour with activity, for the "By hour" screen. Always from the
   /// network: it is opened on demand and not saved on the phone.
   Future<PopularByHourState> loadByHours() async {
-    final now = _now();
     try {
       final report = await _service.rankingByHours(
-        tzOffsetMinutes: now.timeZoneOffset.inMinutes,
+        tzOffsetMinutes: _now().timeZoneOffset.inMinutes,
       );
-      return PopularByHourLoaded(report, currentHour: now.hour);
+      return PopularByHourLoaded(report);
     } catch (e) {
       if (isNetworkError(e)) {
         return const PopularByHourFailed(PopularityFailure.network);
