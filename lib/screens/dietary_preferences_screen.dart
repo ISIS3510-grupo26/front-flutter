@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../models/food_preferences.dart';
+import '../services/profile_prefs.dart';
 import '../theme/app_colors.dart';
 
 class DietaryPreferencesScreen extends StatefulWidget {
-  const DietaryPreferencesScreen({super.key});
+  /// Where the choices are saved; tests pass a fake.
+  final ProfilePrefs? prefs;
+
+  const DietaryPreferencesScreen({super.key, this.prefs});
 
   @override
   State<DietaryPreferencesScreen> createState() =>
@@ -12,6 +17,9 @@ class DietaryPreferencesScreen extends StatefulWidget {
 
 class _DietaryPreferencesScreenState
     extends State<DietaryPreferencesScreen> {
+  late final ProfilePrefs _prefs = widget.prefs ?? ProfilePrefs();
+  bool _saving = false;
+
   String _diet = 'No specific diet';
 
   final Set<String> _avoid = {
@@ -55,8 +63,50 @@ class _DietaryPreferencesScreenState
     });
   }
 
-  void _save() {
-    Navigator.pop(context);
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  /// Shows what the student saved last time; the defaults above until then.
+  Future<void> _load() async {
+    final DietaryPreferences? saved;
+    try {
+      saved = await _prefs.readDietary();
+    } on Exception catch (e) {
+      debugPrint("Couldn't read dietary preferences: $e");
+      return;
+    }
+    if (saved == null || !mounted) return;
+    setState(() {
+      _diet = saved!.diet;
+      _avoid
+        ..clear()
+        ..addAll(saved.avoid);
+      _allergies
+        ..clear()
+        ..addAll(saved.allergies);
+    });
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _prefs.saveDietary(DietaryPreferences(
+        diet: _diet,
+        avoid: {..._avoid},
+        allergies: {..._allergies},
+      ));
+      if (mounted) Navigator.pop(context);
+    } on Exception {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't save your preferences. Try again.")),
+      );
+    }
   }
 
   @override
