@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/telemetry_event.dart';
 import '../repositories/favorites_repository.dart';
 import '../repositories/spots_repository.dart';
 import '../services/auth_client.dart';
@@ -104,15 +105,28 @@ class _HomeShellState extends State<HomeShell> {
           telemetry: _telemetry,
           currentUserId: () => widget.session.userId,
           canReview: widget.session.state is AuthSignedIn,
+          favorites: _favorites,
+          onToggleSaved: _toggleSaved,
         ),
       ),
     );
   }
 
+  /// BQ3 counts a spot opened from search results as a search, then the
+  /// detail reports its page view as usual.
+  void _openFromSearch(String id) {
+    _telemetry.enqueue(
+      TelemetryEvent.search(spotId: id, userId: widget.session.userId),
+    );
+    _openSpot(id);
+  }
+
   void _openChangePassword() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => ChangePasswordScreen(session: widget.session)),
+      MaterialPageRoute(
+        builder: (_) => ChangePasswordScreen(session: widget.session),
+      ),
     );
   }
 
@@ -136,6 +150,7 @@ class _HomeShellState extends State<HomeShell> {
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,
               onOpenSpot: _openSpot,
+              onOpenFromSearch: _openFromSearch,
               popularLoader: _popularLoader,
             ),
             TasteMapScreen(
@@ -149,11 +164,14 @@ class _HomeShellState extends State<HomeShell> {
               onToggleSaved: _toggleSaved,
               nearbyLoader: _nearbyLoader,
               onOpenSpot: _openSpot,
+              sync: _favorites.sync,
+              onRetrySync: _syncFavorites,
             ),
             ProfileScreen(
               onSignOut: widget.session.signOut,
-              onChangePassword:
-                  widget.session.state is AuthSignedIn ? _openChangePassword : null,
+              onChangePassword: widget.session.state is AuthSignedIn
+                  ? _openChangePassword
+                  : null,
             ),
           ],
         ),

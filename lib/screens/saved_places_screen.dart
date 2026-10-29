@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/spot.dart';
+import '../services/favorites_controller.dart';
 import '../services/nearby_favorites_loader.dart';
 import '../theme/app_colors.dart';
 import '../widgets/count_pill.dart';
@@ -33,12 +34,19 @@ class SavedPlacesScreen extends StatefulWidget {
   final ValueChanged<String>? onOpenSpot;
   final NearbyFavoritesLoader nearbyLoader;
 
+  /// Until the server answers there are no saved places to show, so the
+  /// empty list says why instead of claiming there are none.
+  final FavoritesSync sync;
+  final VoidCallback onRetrySync;
+
   const SavedPlacesScreen({
     super.key,
     required this.spots,
     required this.onToggleSaved,
     this.onOpenSpot,
     required this.nearbyLoader,
+    this.sync = FavoritesSync.loaded,
+    required this.onRetrySync,
   });
 
   @override
@@ -163,6 +171,41 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                   failure: failure,
                   onRetry: _showNearby,
                   onOpenSettings: widget.nearbyLoader.openLocationSettings,
+                ),
+              ),
+            _ when visible.isEmpty &&
+                    _filter is! _Nearby &&
+                    widget.sync == FavoritesSync.loading =>
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: CircularProgressIndicator(color: AppColors.tomato),
+                ),
+              ),
+            _ when visible.isEmpty &&
+                    _filter is! _Nearby &&
+                    widget.sync == FavoritesSync.failed =>
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          "Couldn't load your saved places. Check your connection and try again.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.muted),
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: widget.onRetrySync,
+                          child: const Text('Try again'),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             _ when visible.isEmpty => SliverFillRemaining(

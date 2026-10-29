@@ -46,6 +46,10 @@ class Spot {
   final String note;
   final bool isSaved;
 
+  /// WGS84, the same coordinates as the backend catalog.
+  final double latitude;
+  final double longitude;
+
   const Spot({
     required this.id,
     required this.emoji,
@@ -64,8 +68,17 @@ class Spot {
     required this.category,
     required this.noteLabel,
     required this.note,
+    required this.latitude,
+    required this.longitude,
     this.isSaved = false,
   });
+
+  /// Whether [query] appears in the name or the subtitle (cuisine and place),
+  /// ignoring case, like the Kotlin app's search.
+  bool matchesSearch(String query) {
+    final q = query.trim().toLowerCase();
+    return name.toLowerCase().contains(q) || subtitle.toLowerCase().contains(q);
+  }
 
   bool matchesFilter(FeedFilterType filter) => switch (filter) {
         FeedFilterType.inARush => walkMinutes < 10,
@@ -94,6 +107,8 @@ class Spot {
       category: category,
       noteLabel: noteLabel,
       note: note,
+      latitude: latitude,
+      longitude: longitude,
       isSaved: isSaved ?? this.isSaved,
     );
   }

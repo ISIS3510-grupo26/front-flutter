@@ -26,6 +26,17 @@ class TelemetryEvent {
         errorType = null,
         occurredAt = DateTime.now().toUtc();
 
+  /// BQ3: the student opened [spotId] from For You search results. The
+  /// backend counts these as the restaurant's searches for that hour.
+  TelemetryEvent.search({required String this.spotId, this.userId})
+      : eventId = _newEventId(),
+        screen = 'search',
+        durationMs = 0,
+        success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = DateTime.now().toUtc();
+
   TelemetryEvent.restaurantDetail({
     required String this.spotId,
     required this.durationMs,

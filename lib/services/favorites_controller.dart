@@ -6,38 +6,65 @@ import '../models/telemetry_event.dart';
 import '../repositories/favorites_repository.dart';
 import 'telemetry_queue.dart';
 
+/// Whether the saved state on screen is the server's yet.
+enum FavoritesSync { loading, loaded, failed }
+
 /// Owns the spots shown across the app and their saved state, keeping it in
 /// sync with the server for the current user. Without a user, saving is
 /// local only.
+///
+/// Nothing starts out saved: the saved state is only ever what the server
+/// says, so a failed sync shows no favorites instead of made-up ones.
 class FavoritesController extends ChangeNotifier {
   final FavoritesRepository _repository;
   final TelemetryQueue _telemetry;
   final String? Function() _currentUserId;
   final _pending = <String>{};
   List<Spot> _spots;
+  FavoritesSync _sync = FavoritesSync.loading;
 
   FavoritesController({
     required this._repository,
     required this._telemetry,
     required this._currentUserId,
     List<Spot>? spots,
-  }) : _spots = spots ?? List.of(sampleSpots);
+  }) : _spots =
+           spots ??
+           [for (final spot in sampleSpots) spot.copyWith(isSaved: false)];
 
   List<Spot> get spots => _spots;
 
+  FavoritesSync get sync => _sync;
+
+  /// The catalog spot with [id], or null if the app doesn't know it.
+  Spot? spotById(String id) {
+    for (final spot in _spots) {
+      if (spot.id == id) return spot;
+    }
+    return null;
+  }
+
   /// Replaces local saved state with the server's. Spots with a save or
-  /// unsave still in flight keep their local state.
+  /// unsave still in flight keep their local state. On failure [sync] is
+  /// [FavoritesSync.failed] and the error is rethrown.
   Future<void> syncFromServer() async {
     final userId = _currentUserId();
-    if (userId == null) return;
-    final savedIds = await _repository.fetchFavoriteIds(userId);
+    if (userId == null) return _setSync(FavoritesSync.loaded);
+    _setSync(FavoritesSync.loading);
+    final Set<String> savedIds;
+    try {
+      savedIds = await _repository.fetchFavoriteIds(userId);
+    } on Exception {
+      _setSync(FavoritesSync.failed);
+      rethrow;
+    }
     _spots = [
       for (final spot in _spots)
         _pending.contains(spot.id)
             ? spot
             : spot.copyWith(isSaved: savedIds.contains(spot.id)),
     ];
-    notifyListeners();
+    _setSync(FavoritesSync.loaded);
   }
 
   /// Flips [spotId]'s saved state right away, then saves it to the server.
@@ -71,6 +98,11 @@ class FavoritesController extends ChangeNotifier {
       for (final spot in _spots)
         spot.id == spotId ? spot.copyWith(isSaved: saved) : spot,
     ];
+    notifyListeners();
+  }
+
+  void _setSync(FavoritesSync sync) {
+    _sync = sync;
     notifyListeners();
   }
 }

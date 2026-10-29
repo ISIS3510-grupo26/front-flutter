@@ -4,11 +4,14 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/spot_detail.dart';
 import '../models/telemetry_event.dart';
 import '../repositories/api_exception.dart';
 import '../repositories/spots_repository.dart';
+import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
 import '../services/place_detail_loader.dart';
 import '../services/telemetry_queue.dart';
@@ -24,6 +27,11 @@ class PlaceDetailScreen extends StatefulWidget {
 
   final bool canReview;
 
+  /// The app-wide saved state, so the heart here matches For You and Saved,
+  /// and the catalog coordinates for walking directions.
+  final FavoritesController favorites;
+  final ValueChanged<String> onToggleSaved;
+
   /// Saved copies of the pages, for offline use.
   final SpotDetailStorage storage;
 
@@ -34,6 +42,8 @@ class PlaceDetailScreen extends StatefulWidget {
     required this.telemetry,
     required this.currentUserId,
     required this.canReview,
+    required this.favorites,
+    required this.onToggleSaved,
     this.storage = const SqliteSpotDetailStorage(),
   });
 
@@ -42,7 +52,6 @@ class PlaceDetailScreen extends StatefulWidget {
 }
 
 class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
-  bool _saved = false;
   SpotDetail? _spot;
   bool _failed = false;
   bool _reviewed = false;
@@ -114,6 +123,48 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
         http.ClientException() => 'NETWORK_ERROR',
         _ => 'UNKNOWN',
       };
+
+  /// Google Maps walking directions to the spot, from the catalog
+  /// coordinates; null for a spot the app has no coordinates for.
+  Uri? _directionsUri(String spotId) {
+    final spot = widget.favorites.spotById(spotId);
+    if (spot == null) return null;
+    return Uri.https('www.google.com', '/maps/dir/', {
+      'api': '1',
+      'destination': '${spot.latitude},${spot.longitude}',
+      'travelmode': 'walking',
+    });
+  }
+
+  Future<void> _openDirections(Uri uri) async {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened) _showMessage("Couldn't open maps on this phone.");
+  }
+
+  Future<void> _share(SpotDetail spot) async {
+    final directions = _directionsUri(spot.id);
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          subject: spot.name,
+          text: [
+            '${spot.name} · ${spot.subtitle}',
+            '⭐ ${spot.rating} on CampusBites',
+            if (directions != null) '$directions',
+          ].join('\n'),
+        ),
+      );
+    } on Exception {
+      _showMessage("Couldn't open the share menu.");
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
   Future<void> _writeReview(SpotDetail spot) async {
     final result = await Navigator.push<ReviewResult>(
@@ -193,16 +244,26 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                       ),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => setState(() => _saved = !_saved),
-                    icon: Icon(
-                      _saved ? Icons.favorite : Icons.favorite_border,
-                      color: AppColors.tomato,
+                  if (widget.favorites.spotById(spot.id) != null)
+                    ListenableBuilder(
+                      listenable: widget.favorites,
+                      builder: (context, _) {
+                        final saved =
+                            widget.favorites.spotById(spot.id)?.isSaved ?? false;
+                        return IconButton(
+                          onPressed: () => widget.onToggleSaved(spot.id),
+                          tooltip: saved ? 'Remove from saved' : 'Save this spot',
+                          icon: Icon(
+                            saved ? Icons.favorite : Icons.favorite_border,
+                            color: AppColors.tomato,
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                  const IconButton(
-                    onPressed: null,
-                    icon: Icon(Icons.share_outlined, color: AppColors.espresso),
+                  IconButton(
+                    onPressed: () => _share(spot),
+                    tooltip: 'Share',
+                    icon: const Icon(Icons.share_outlined, color: AppColors.espresso),
                   ),
                 ],
               ),
@@ -461,7 +522,9 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: null,
+              onPressed: _directionsUri(spot.id) == null
+                  ? null
+                  : () => _openDirections(_directionsUri(spot.id)!),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.tomato,
                 disabledBackgroundColor: AppColors.tomato,

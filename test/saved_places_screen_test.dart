@@ -27,6 +27,7 @@ void main() {
           spots: sampleSpots,
           onToggleSaved: (_) {},
           nearbyLoader: loader,
+          onRetrySync: () {},
         ),
       ),
     ));
