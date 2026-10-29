@@ -32,6 +32,16 @@ class SpotActivity {
       total: json['total'] as int,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'rank': rank,
+        'spotId': spotId,
+        'name': name,
+        'emoji': emoji,
+        'pageViews': pageViews,
+        'searches': searches,
+        'total': total,
+      };
 }
 
 /// The most popular spots during one hour of the day (campus local time),
@@ -67,6 +77,14 @@ class HourlyRanking {
       ],
     );
   }
+
+  /// Same shape as the backend JSON, so [fromJson] reads it back.
+  Map<String, dynamic> toJson() => {
+        'hour': hour,
+        'totalPageViews': totalPageViews,
+        'totalSearches': totalSearches,
+        'spots': [for (final spot in spots) spot.toJson()],
+      };
 
   bool get isEmpty => spots.isEmpty;
 
