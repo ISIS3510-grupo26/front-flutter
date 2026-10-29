@@ -367,6 +367,8 @@ class _FailedView extends StatelessWidget {
       TasteMapFailure.signedOut => 'Sign in to see top spots near you.',
       TasteMapFailure.network =>
         "Couldn't reach CampusBites. Check your connection and try again.",
+      TasteMapFailure.server =>
+        "CampusBites couldn't load top spots right now. Try again in a moment.",
     };
 
     return Center(

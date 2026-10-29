@@ -1,13 +1,16 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/nearby_pick.dart';
+import '../repositories/api_exception.dart';
 import 'local_database.dart';
 import 'lru_cache.dart';
 import 'location_service.dart';
 import 'recommendations_service_adapter.dart';
 import 'taste_map_prefs.dart';
 
-enum TasteMapFailure { signedOut, network }
+/// [network]: no connection and nothing saved on the phone. [server]: the
+/// backend answered with an error, or with data the app couldn't read.
+enum TasteMapFailure { signedOut, network, server }
 
 sealed class TasteMapState {
   const TasteMapState();
@@ -123,8 +126,10 @@ class TasteMapLoader {
         userLng: lng,
         usedFallback: usedFallback,
       );
-    } catch (_) {
-      return _loadSaved();
+    } catch (e) {
+      if (isNetworkError(e)) return _loadSaved();
+      debugPrint("Couldn't load the Taste Map: $e");
+      return const TasteMapFailed(TasteMapFailure.server);
     }
   }
 
