@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../repositories/favorites_repository.dart';
-import '../repositories/recommendations_repository.dart';
 import '../repositories/spots_repository.dart';
 import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/favorites_controller.dart';
+import '../services/local_database.dart';
 import '../services/nearby_favorites_loader.dart';
+import '../services/recommendations_service_adapter.dart';
 import '../services/taste_map_loader.dart';
+import '../services/taste_map_prefs.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
@@ -47,10 +49,12 @@ class _HomeShellState extends State<HomeShell> {
     favorites: _api,
     currentUserId: () => widget.session.userId,
   );
-  late final _recommendations = RecommendationsRepository(client: _http);
+  late final _recommendations = RecommendationsServiceAdapter(client: _http);
   late final _tasteMapLoader = TasteMapLoader(
     recommendations: _recommendations,
     currentUserId: () => widget.session.userId,
+    storage: const SqliteTasteMapStorage(),
+    prefs: TasteMapPrefs(),
   );
 
   @override
@@ -126,7 +130,12 @@ class _HomeShellState extends State<HomeShell> {
               onToggleSaved: _toggleSaved,
               onOpenSpot: _openSpot,
             ),
-            TasteMapScreen(loader: _tasteMapLoader, onOpenSpot: _openSpot),
+            TasteMapScreen(
+              loader: _tasteMapLoader,
+              telemetry: _telemetry,
+              currentUserId: () => widget.session.userId,
+              onOpenSpot: _openSpot,
+            ),
             SavedPlacesScreen(
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,

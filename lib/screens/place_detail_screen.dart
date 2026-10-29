@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -8,8 +9,11 @@ import '../models/spot_detail.dart';
 import '../models/telemetry_event.dart';
 import '../repositories/api_exception.dart';
 import '../repositories/spots_repository.dart';
+import '../services/local_database.dart';
+import '../services/place_detail_loader.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
+import '../widgets/offline_banner.dart';
 import 'write_review_screen.dart';
 
 class PlaceDetailScreen extends StatefulWidget {
@@ -20,6 +24,9 @@ class PlaceDetailScreen extends StatefulWidget {
 
   final bool canReview;
 
+  /// Saved copies of the pages, for offline use.
+  final SpotDetailStorage storage;
+
   const PlaceDetailScreen({
     super.key,
     required this.spotId,
@@ -27,6 +34,7 @@ class PlaceDetailScreen extends StatefulWidget {
     required this.telemetry,
     required this.currentUserId,
     required this.canReview,
+    this.storage = const SqliteSpotDetailStorage(),
   });
 
   @override
@@ -39,23 +47,51 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   bool _failed = false;
   bool _reviewed = false;
 
+  /// Set while the page shows the copy saved on the phone.
+  DateTime? _offlineSavedAt;
+  late final StreamSubscription<List<ConnectivityResult>> _connectivity;
+
   @override
   void initState() {
     super.initState();
+    _connectivity = Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
     _load(reportVisit: true);
+  }
+
+  @override
+  void dispose() {
+    _connectivity.cancel();
+    super.dispose();
+  }
+
+  /// Stream: when the connection comes back while the page shows saved data
+  /// (or an error), it reloads by itself. Not reported as a new visit.
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    final online = results.any((r) => r != ConnectivityResult.none);
+    if (online && (_offlineSavedAt != null || _failed)) _load(reportVisit: false);
   }
 
   Future<void> _load({required bool reportVisit}) async {
     if (_failed) setState(() => _failed = false);
     final watch = Stopwatch()..start();
-    try {
-      final spot = await widget.repository.fetchSpot(widget.spotId);
-      if (reportVisit) _report(watch.elapsedMilliseconds, httpStatus: 200);
-      if (mounted) setState(() => _spot = spot);
-    } on Object catch (e) {
-      if (reportVisit) _report(watch.elapsedMilliseconds, error: e);
-      if (mounted) setState(() => _failed = true);
+    final result = await loadPlaceDetail(
+      spotId: widget.spotId,
+      fetch: widget.repository.fetchSpot,
+      storage: widget.storage,
+    );
+    if (reportVisit) {
+      final error = result.networkError;
+      _report(watch.elapsedMilliseconds, httpStatus: error == null ? 200 : null, error: error);
     }
+    if (!mounted) return;
+    setState(() {
+      if (result.spot case final spot?) {
+        _spot = spot;
+        _offlineSavedAt = result.offlineSavedAt;
+      } else {
+        _failed = true;
+      }
+    });
   }
 
   void _report(int durationMs, {int? httpStatus, Object? error}) {
@@ -176,6 +212,13 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
             sliver: SliverList.list(
               children: [
+                if (_offlineSavedAt case final savedAt?) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OfflineBanner(message: 'Offline · saved on ${hourMinute(savedAt)}'),
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 SizedBox(
                   height: 200,
                   child: Stack(
@@ -397,6 +440,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                   totalReviews: spot.totalReviews,
                   onWrite: widget.canReview && !_reviewed ? () => _writeReview(spot) : null,
                   hint: widget.canReview ? null : 'Sign in with an account to leave a review.',
+                  offline: _offlineSavedAt != null,
                 ),
                 const SizedBox(height: 10),
                 for (final review in spot.reviews) ...[
@@ -453,7 +497,15 @@ class _ReviewsHeader extends StatelessWidget {
   final VoidCallback? onWrite;
   final String? hint;
 
-  const _ReviewsHeader({required this.totalReviews, required this.onWrite, this.hint});
+  /// Showing saved data: the write button stays visible but disabled.
+  final bool offline;
+
+  const _ReviewsHeader({
+    required this.totalReviews,
+    required this.onWrite,
+    this.hint,
+    this.offline = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -472,7 +524,13 @@ class _ReviewsHeader extends StatelessWidget {
                 ),
               ),
             ),
-            if (onWrite != null)
+            if (offline)
+              TextButton.icon(
+                onPressed: null,
+                icon: const Icon(Icons.cloud_off, size: 18),
+                label: const Text('Reviews need internet'),
+              )
+            else if (onWrite != null)
               TextButton.icon(
                 onPressed: onWrite,
                 icon: const Icon(Icons.rate_review_outlined, size: 18, color: AppColors.tomato),

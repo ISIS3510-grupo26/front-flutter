@@ -37,6 +37,32 @@ class TelemetryEvent {
         screen = 'restaurant_detail',
         occurredAt = DateTime.now().toUtc();
 
+  /// BQ14: one Taste Map load (or, at most once per load, its map images
+  /// failing with [errorType] 'tiles_failed').
+  TelemetryEvent.mapDisplay({
+    this.userId,
+    required this.success,
+    this.errorType,
+    required this.durationMs,
+  })  : eventId = _newEventId(),
+        screen = 'map_display',
+        spotId = null,
+        httpStatus = null,
+        occurredAt = DateTime.now().toUtc();
+
+  /// Reads back an event written with [toJson] (the BQ14 offline outbox).
+  /// Keeps the same eventId, so a resend is never counted twice.
+  TelemetryEvent.fromJson(Map<String, dynamic> json)
+      : eventId = json['eventId'] as String,
+        screen = json['screen'] as String,
+        spotId = json['spotId'] as String?,
+        userId = json['userId'] as String?,
+        durationMs = json['durationMs'] as int,
+        success = json['success'] as bool,
+        httpStatus = json['httpStatus'] as int?,
+        errorType = json['errorType'] as String?,
+        occurredAt = DateTime.parse(json['occurredAt'] as String);
+
   Map<String, dynamic> toJson() => {
         'eventId': eventId,
         'screen': screen,
