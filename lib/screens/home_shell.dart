@@ -7,6 +7,9 @@ import '../services/auth_session.dart';
 import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
 import '../services/nearby_favorites_loader.dart';
+import '../services/popularity_loader.dart';
+import '../services/popularity_prefs.dart';
+import '../services/popularity_service.dart';
 import '../services/recommendations_service_adapter.dart';
 import '../services/taste_map_loader.dart';
 import '../services/taste_map_prefs.dart';
@@ -55,6 +58,10 @@ class _HomeShellState extends State<HomeShell> {
     currentUserId: () => widget.session.userId,
     storage: const SqliteTasteMapStorage(),
     prefs: TasteMapPrefs(),
+  );
+  late final _popularLoader = PopularityLoader(
+    service: PopularityServiceAdapter(client: _http),
+    prefs: PopularityPrefs(),
   );
 
   @override
@@ -129,6 +136,7 @@ class _HomeShellState extends State<HomeShell> {
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,
               onOpenSpot: _openSpot,
+              popularLoader: _popularLoader,
             ),
             TasteMapScreen(
               loader: _tasteMapLoader,

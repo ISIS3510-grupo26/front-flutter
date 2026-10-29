@@ -34,14 +34,14 @@ class SpotActivity {
   }
 
   Map<String, dynamic> toJson() => {
-        'rank': rank,
-        'spotId': spotId,
-        'name': name,
-        'emoji': emoji,
-        'pageViews': pageViews,
-        'searches': searches,
-        'total': total,
-      };
+    'rank': rank,
+    'spotId': spotId,
+    'name': name,
+    'emoji': emoji,
+    'pageViews': pageViews,
+    'searches': searches,
+    'total': total,
+  };
 }
 
 /// The most popular spots during one hour of the day (campus local time),
@@ -59,12 +59,12 @@ class HourlyRanking {
     required this.spots,
   });
 
-  /// An hour with no activity. The backend leaves such hours out of its
-  /// report, so the app uses this instead of treating it as an error.
+  /// An hour with no activity. The full report leaves such hours out, so the
+  /// app uses this instead of treating a missing hour as an error.
   const HourlyRanking.empty(this.hour)
-      : totalPageViews = 0,
-        totalSearches = 0,
-        spots = const [];
+    : totalPageViews = 0,
+      totalSearches = 0,
+      spots = const [];
 
   factory HourlyRanking.fromJson(Map<String, dynamic> json) {
     return HourlyRanking(
@@ -80,16 +80,19 @@ class HourlyRanking {
 
   /// Same shape as the backend JSON, so [fromJson] reads it back.
   Map<String, dynamic> toJson() => {
-        'hour': hour,
-        'totalPageViews': totalPageViews,
-        'totalSearches': totalSearches,
-        'spots': [for (final spot in spots) spot.toJson()],
-      };
+    'hour': hour,
+    'totalPageViews': totalPageViews,
+    'totalSearches': totalSearches,
+    'spots': [for (final spot in spots) spot.toJson()],
+  };
 
   bool get isEmpty => spots.isEmpty;
 
   /// The hour as a range, e.g. '13:00–14:00'; 23 wraps to '23:00–00:00'.
-  String get label => '${_twoDigits(hour)}:00–${_twoDigits((hour + 1) % 24)}:00';
+  String get label => labelFor(hour);
+
+  static String labelFor(int hour) =>
+      '${_twoDigits(hour)}:00–${_twoDigits((hour + 1) % 24)}:00';
 
   static String _twoDigits(int value) => value.toString().padLeft(2, '0');
 }
@@ -114,7 +117,7 @@ class PopularityReport {
 
   /// The ranking for [hour], or an empty one if nobody was active then.
   HourlyRanking rankingFor(int hour) => hours.firstWhere(
-        (ranking) => ranking.hour == hour,
-        orElse: () => HourlyRanking.empty(hour),
-      );
+    (ranking) => ranking.hour == hour,
+    orElse: () => HourlyRanking.empty(hour),
+  );
 }

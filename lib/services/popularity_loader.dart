@@ -18,7 +18,8 @@ final class PopularityLoading extends PopularityState {
   const PopularityLoading();
 }
 
-/// Nobody was active at [hour], so there is nothing to show.
+/// The backend says nobody was active at [hour]. Only comes from the
+/// network: an empty ranking saved on the phone counts as nothing saved.
 final class PopularityEmpty extends PopularityState {
   final int hour;
 
@@ -41,6 +42,30 @@ final class PopularityFailed extends PopularityState {
   const PopularityFailed(this.reason);
 }
 
+/// The "See all" screen: every hour with activity.
+sealed class PopularByHourState {
+  const PopularByHourState();
+}
+
+final class PopularByHourLoading extends PopularByHourState {
+  const PopularByHourLoading();
+}
+
+final class PopularByHourLoaded extends PopularByHourState {
+  final PopularityReport report;
+
+  /// The phone's hour when the report was requested, to mark it as "Now".
+  final int currentHour;
+
+  const PopularByHourLoaded(this.report, {required this.currentHour});
+}
+
+final class PopularByHourFailed extends PopularByHourState {
+  final PopularityFailure reason;
+
+  const PopularByHourFailed(this.reason);
+}
+
 /// Loads the "Popular right now" ranking for the phone's current hour.
 ///
 /// The loader owns the clock: one reading decides both which hour to ask for
@@ -61,19 +86,23 @@ class PopularityLoader {
     required this._service,
     required this._prefs,
     DateTime Function()? now,
-  })  : _now = now ?? DateTime.now,
-        _cache = LruCache(
-          capacity: 24,
-          ttl: const Duration(minutes: 5),
-          now: now ?? DateTime.now,
-        );
+  }) : _now = now ?? DateTime.now,
+       _cache = LruCache(
+         capacity: 24,
+         ttl: const Duration(minutes: 5),
+         now: now ?? DateTime.now,
+       );
 
   /// Multithreading strategy: async/await. The network call and its parsing
   /// (which runs in an isolate) are awaited without blocking the UI thread.
-  Future<PopularityState> load() async {
+  /// A recent ranking for this hour comes from the LRU cache unless
+  /// [forceRefresh] is true (pull to refresh).
+  Future<PopularityState> load({bool forceRefresh = false}) async {
     final now = _now();
     final hour = now.hour;
-    if (_cache.get(hour) case final cached?) return _stateFor(cached);
+    if (!forceRefresh) {
+      if (_cache.get(hour) case final cached?) return _stateFor(cached);
+    }
 
     try {
       final ranking = await _service.rankingAt(
@@ -90,10 +119,27 @@ class PopularityLoader {
     }
   }
 
-  static PopularityState _stateFor(HourlyRanking ranking, {DateTime? offlineSavedAt}) =>
-      ranking.isEmpty
-          ? PopularityEmpty(ranking.hour)
-          : PopularityLoaded(ranking, offlineSavedAt: offlineSavedAt);
+  /// Every hour with activity, for the "See all" screen. Always from the
+  /// network: it is opened on demand and not saved on the phone.
+  Future<PopularByHourState> loadByHours() async {
+    final now = _now();
+    try {
+      final report = await _service.rankingByHours(
+        tzOffsetMinutes: now.timeZoneOffset.inMinutes,
+      );
+      return PopularByHourLoaded(report, currentHour: now.hour);
+    } catch (e) {
+      if (isNetworkError(e)) {
+        return const PopularByHourFailed(PopularityFailure.network);
+      }
+      debugPrint("Couldn't load the ranking by hour: $e");
+      return const PopularByHourFailed(PopularityFailure.server);
+    }
+  }
+
+  static PopularityState _stateFor(HourlyRanking ranking) => ranking.isEmpty
+      ? PopularityEmpty(ranking.hour)
+      : PopularityLoaded(ranking);
 
   /// Multithreading strategy: Future with handler. Saving for offline use is
   /// fire-and-forget with .catchError(): For You shows the ranking right away
@@ -102,16 +148,19 @@ class PopularityLoader {
   void _saveForOffline(HourlyRanking ranking, DateTime savedAt) {
     _prefs
         .save(ranking, savedAt: savedAt)
-        .catchError((Object e) => debugPrint("Couldn't save Popular right now offline: $e"));
+        .catchError(
+          (Object e) =>
+              debugPrint("Couldn't save Popular right now offline: $e"),
+        );
   }
 
   /// Eventual connectivity: without network, the last ranking saved on the
-  /// phone, with when it was saved. Only with nothing saved is it a network
-  /// failure.
+  /// phone, with when it was saved. With nothing saved, or only an empty
+  /// hour, it is a network failure.
   Future<PopularityState> _loadSaved() async {
     try {
-      if (await _prefs.read() case final last?) {
-        return _stateFor(last.ranking, offlineSavedAt: last.savedAt);
+      if (await _prefs.read() case final last? when !last.ranking.isEmpty) {
+        return PopularityLoaded(last.ranking, offlineSavedAt: last.savedAt);
       }
     } catch (e) {
       debugPrint("Couldn't read the offline Popular right now: $e");
