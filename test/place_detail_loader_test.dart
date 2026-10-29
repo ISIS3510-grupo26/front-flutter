@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:campus_bites/models/spot_detail.dart';
+import 'package:campus_bites/repositories/api_exception.dart';
 import 'package:campus_bites/services/local_database.dart';
 import 'package:campus_bites/services/place_detail_loader.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -51,7 +52,7 @@ void main() {
 
     expect(result.spot!.name, 'Nitro Coffee & Brew');
     expect(result.offlineSavedAt, isNull);
-    expect(result.networkError, isNull);
+    expect(result.error, isNull);
     expect(storage.saved.keys, ['nitro-coffee']);
   });
 
@@ -67,7 +68,7 @@ void main() {
 
     expect(result.spot!.id, 'nitro-coffee');
     expect(result.offlineSavedAt, DateTime(2026, 10, 27, 13, 5));
-    expect(result.networkError, error);
+    expect(result.error, error);
   });
 
   test('network fails and nothing is saved: no page, only the error', () async {
@@ -79,7 +80,21 @@ void main() {
 
     expect(result.spot, isNull);
     expect(result.offlineSavedAt, isNull);
-    expect(result.networkError, isA<SocketException>());
+    expect(result.error, isA<SocketException>());
+  });
+
+  test('an HTTP error never shows the saved copy', () async {
+    await storage.save(_spot);
+
+    final result = await loadPlaceDetail(
+      spotId: 'nitro-coffee',
+      fetch: (_) async => throw const ApiException(500),
+      storage: storage,
+    );
+
+    expect(result.spot, isNull);
+    expect(result.offlineSavedAt, isNull);
+    expect(result.error, isA<ApiException>());
   });
 
   test('toJson() reads back the same page with fromJson()', () {

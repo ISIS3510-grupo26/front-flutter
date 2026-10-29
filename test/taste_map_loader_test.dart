@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:campus_bites/models/nearby_pick.dart';
 import 'package:campus_bites/repositories/api_exception.dart';
 import 'package:campus_bites/services/local_database.dart';
@@ -189,7 +191,7 @@ void main() {
         ),
       ];
       prefs.last = (syncedAt: savedAt, lat: 4.6018, lng: -74.0661);
-      recommendations.error = const ApiException(503);
+      recommendations.error = const SocketException('offline');
 
       final offline = await loader.load() as TasteMapLoaded;
 
@@ -200,25 +202,46 @@ void main() {
     });
 
     test('without network and nothing saved it is a network failure', () async {
-      recommendations.error = const ApiException(503);
+      recommendations.error = const SocketException('offline');
 
       final state = await loader.load();
 
       expect((state as TasteMapFailed).reason, TasteMapFailure.network);
     });
+
+    test('an HTTP error is a server failure, even with picks saved', () async {
+      storage.picks = const [
+        NearbyPick(
+          id: 'green-bowl-co',
+          name: 'Green Bowl Co.',
+          emoji: '🥗',
+          rating: 4.8,
+          latitude: 4.6025,
+          longitude: -74.0650,
+          distanceMeters: 120,
+          walkMinutes: 2,
+        ),
+      ];
+      prefs.last = (syncedAt: DateTime(2026, 10, 27, 9, 30), lat: 4.6018, lng: -74.0661);
+      recommendations.error = const ApiException(503);
+
+      final state = await loader.load();
+
+      expect((state as TasteMapFailed).reason, TasteMapFailure.server);
+    });
   });
 
-  test('reports a network failure when the API call fails', () async {
+  test('a response the app cannot read is a server failure', () async {
     final loader = TasteMapLoader(
       location: const _FakeLocation(),
-      recommendations: _FakeRecommendations(error: const ApiException(500)),
+      recommendations: _FakeRecommendations(error: const FormatException('bad JSON')),
       currentUserId: () => 'u1',
       storage: _MemoryPicks(),
       prefs: _MemoryPrefs(),
     );
 
     final state = await loader.load();
-    expect((state as TasteMapFailed).reason, TasteMapFailure.network);
+    expect((state as TasteMapFailed).reason, TasteMapFailure.server);
   });
 
   group('LRU cache', () {

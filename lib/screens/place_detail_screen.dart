@@ -80,7 +80,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
       storage: widget.storage,
     );
     if (reportVisit) {
-      final error = result.networkError;
+      final error = result.error;
       _report(watch.elapsedMilliseconds, httpStatus: error == null ? 200 : null, error: error);
     }
     if (!mounted) return;
