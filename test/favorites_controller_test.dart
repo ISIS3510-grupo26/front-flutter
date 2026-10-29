@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:campus_bites/data/spots_data.dart';
 import 'package:campus_bites/models/telemetry_event.dart';
@@ -12,10 +13,14 @@ class _FakeRepository extends Fake implements FavoritesRepository {
   final calls = <String>[];
   Set<String> serverIds = {};
   Object? error;
+  Object? fetchError;
   Completer<void>? gate;
 
   @override
-  Future<Set<String>> fetchFavoriteIds(String userId) async => serverIds;
+  Future<Set<String>> fetchFavoriteIds(String userId) async {
+    if (fetchError case final e?) throw e;
+    return serverIds;
+  }
 
   @override
   Future<void> addFavorite(String userId, String spotId) =>
@@ -69,8 +74,39 @@ void main() {
         containsPair('spotId', 'poodle-pizza-slices'));
   });
 
-  test('unsaving calls DELETE and sends no telemetry', () async {
+  test('nothing starts out saved, so no sample favorites are ever shown', () {
     final c = controller();
+
+    expect(c.spots.where((s) => s.isSaved), isEmpty);
+    expect(c.sync, FavoritesSync.loading);
+  });
+
+  test('a failed sync is reported and leaves nothing saved', () async {
+    repo.fetchError = const SocketException('offline');
+    final c = controller();
+
+    await expectLater(c.syncFromServer(), throwsA(isA<SocketException>()));
+    expect(c.sync, FavoritesSync.failed);
+    expect(c.spots.where((s) => s.isSaved), isEmpty);
+
+    repo.fetchError = null;
+    repo.serverIds = {'nitro-coffee'};
+    await c.syncFromServer();
+    expect(c.sync, FavoritesSync.loaded);
+    expect(isSaved(c, 'nitro-coffee'), isTrue);
+  });
+
+  test('spotById finds catalog spots only', () {
+    final c = controller();
+
+    expect(c.spotById('green-bowl-co')?.name, 'Green Bowl Co.');
+    expect(c.spotById('unknown'), isNull);
+  });
+
+  test('unsaving calls DELETE and sends no telemetry', () async {
+    repo.serverIds = {'conda-de-bons'};
+    final c = controller();
+    await c.syncFromServer();
     await c.toggleSaved('conda-de-bons');
 
     expect(isSaved(c, 'conda-de-bons'), isFalse);

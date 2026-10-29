@@ -12,6 +12,9 @@ class ForYouScreen extends StatefulWidget {
   final List<Spot> spots;
   final ValueChanged<String> onToggleSaved;
   final ValueChanged<String>? onOpenSpot;
+
+  /// Opening a spot from search results, which BQ3 counts as a search.
+  final ValueChanged<String>? onOpenFromSearch;
   final PopularityLoader popularLoader;
 
   const ForYouScreen({
@@ -20,6 +23,7 @@ class ForYouScreen extends StatefulWidget {
     required this.onToggleSaved,
     required this.popularLoader,
     this.onOpenSpot,
+    this.onOpenFromSearch,
   });
 
   @override
@@ -28,6 +32,7 @@ class ForYouScreen extends StatefulWidget {
 
 class _ForYouScreenState extends State<ForYouScreen> {
   final Set<FeedFilterType> _activeFilters = {FeedFilterType.inARush};
+  final _search = TextEditingController();
   PopularityState _popular = const PopularityLoading();
 
   /// Coming back to the app reloads the section: within 5 minutes it comes
@@ -38,12 +43,14 @@ class _ForYouScreenState extends State<ForYouScreen> {
   void initState() {
     super.initState();
     _lifecycle = AppLifecycleListener(onResume: _loadPopular);
+    _search.addListener(() => setState(() {}));
     _loadPopular();
   }
 
   @override
   void dispose() {
     _lifecycle.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -82,9 +89,18 @@ class _ForYouScreenState extends State<ForYouScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // While searching, the filters and Popular right now step aside, as in
+    // the Kotlin app: the list shows every spot that matches the text.
+    final query = _search.text.trim();
+    final searching = query.isNotEmpty;
     final feed = widget.spots
-        .where((spot) => _activeFilters.every(spot.matchesFilter))
+        .where(
+          (spot) => searching
+              ? spot.matchesSearch(query)
+              : _activeFilters.every(spot.matchesFilter),
+        )
         .toList();
+    final openSpot = searching ? widget.onOpenFromSearch : widget.onOpenSpot;
 
     return SafeArea(
       bottom: false,
@@ -140,42 +156,53 @@ class _ForYouScreenState extends State<ForYouScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      height: 40,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: FeedFilterType.values.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 10),
-                        itemBuilder: (context, index) {
-                          final filter = FeedFilterType.values[index];
-                          return FilterChipPill(
-                            label: filter.label,
-                            active: _activeFilters.contains(filter),
-                            onTap: () => _toggleFilter(filter),
-                          );
-                        },
+                    _SearchBar(controller: _search),
+                    if (!searching) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 40,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: FeedFilterType.values.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (context, index) {
+                            final filter = FeedFilterType.values[index];
+                            return FilterChipPill(
+                              label: filter.label,
+                              active: _activeFilters.contains(filter),
+                              onTap: () => _toggleFilter(filter),
+                            );
+                          },
+                        ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 4),
                   ],
                 ),
               ),
             ),
-            SliverToBoxAdapter(
-              child: PopularNowSection(
-                state: _popular,
-                onRetry: _retryPopular,
-                onSeeAll: _openPopularByHour,
-                onOpenSpot: widget.onOpenSpot,
+            if (!searching)
+              SliverToBoxAdapter(
+                child: PopularNowSection(
+                  state: _popular,
+                  onRetry: _retryPopular,
+                  onSeeAll: _openPopularByHour,
+                  onOpenSpot: widget.onOpenSpot,
+                ),
               ),
-            ),
             if (feed.isEmpty)
-              const SliverFillRemaining(
+              SliverFillRemaining(
                 hasScrollBody: false,
                 child: Center(
-                  child: Text(
-                    'No spots match these filters yet.',
-                    style: TextStyle(color: AppColors.muted),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      searching
+                          ? 'No spots match "$query".'
+                          : 'No spots match these filters yet.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AppColors.muted),
+                    ),
                   ),
                 ),
               )
@@ -190,15 +217,49 @@ class _ForYouScreenState extends State<ForYouScreen> {
                     return SpotCard(
                       spot: spot,
                       onToggleSaved: () => widget.onToggleSaved(spot.id),
-                      onTap: widget.onOpenSpot == null
-                          ? null
-                          : () => widget.onOpenSpot!(spot.id),
+                      onTap: openSpot == null ? null : () => openSpot(spot.id),
                     );
                   },
                 ),
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SearchBar extends StatelessWidget {
+  final TextEditingController controller;
+
+  const _SearchBar({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    OutlineInputBorder border(Color color) => OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide(color: color),
+    );
+    return TextField(
+      controller: controller,
+      textInputAction: TextInputAction.search,
+      cursorColor: AppColors.tomato,
+      style: const TextStyle(fontSize: 14, color: AppColors.espresso),
+      decoration: InputDecoration(
+        hintText: 'Search a spot, cuisine or place',
+        hintStyle: const TextStyle(fontSize: 14, color: AppColors.muted),
+        prefixIcon: const Icon(Icons.search, color: AppColors.muted),
+        suffixIcon: controller.text.isEmpty
+            ? null
+            : IconButton(
+                onPressed: controller.clear,
+                tooltip: 'Clear search',
+                icon: const Icon(Icons.close, color: AppColors.muted),
+              ),
+        filled: true,
+        fillColor: AppColors.card,
+        enabledBorder: border(AppColors.border),
+        focusedBorder: border(AppColors.tomato),
       ),
     );
   }

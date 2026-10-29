@@ -1,15 +1,23 @@
 import 'package:flutter/material.dart';
 
+import '../models/food_preferences.dart';
+import '../services/profile_prefs.dart';
 import '../theme/app_colors.dart';
 
 class TasteProfileScreen extends StatefulWidget {
-  const TasteProfileScreen({super.key});
+  /// Where the choices are saved; tests pass a fake.
+  final ProfilePrefs? prefs;
+
+  const TasteProfileScreen({super.key, this.prefs});
 
   @override
   State<TasteProfileScreen> createState() => _TasteProfileScreenState();
 }
 
 class _TasteProfileScreenState extends State<TasteProfileScreen> {
+  late final ProfilePrefs _prefs = widget.prefs ?? ProfilePrefs();
+  bool _saving = false;
+
   String _mainCuisine = 'Colombian';
   String _mealStyle = 'Quick & casual';
 
@@ -66,8 +74,52 @@ class _TasteProfileScreenState extends State<TasteProfileScreen> {
     });
   }
 
-  void _save() {
-    Navigator.pop(context);
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  /// Shows what the student saved last time; the defaults above until then.
+  Future<void> _load() async {
+    final TastePreferences? saved;
+    try {
+      saved = await _prefs.readTaste();
+    } on Exception catch (e) {
+      debugPrint("Couldn't read the taste profile: $e");
+      return;
+    }
+    if (saved == null || !mounted) return;
+    setState(() {
+      _mainCuisine = saved!.mainCuisine;
+      _mealStyle = saved.mealStyle;
+      _flavors
+        ..clear()
+        ..addAll(saved.flavors);
+      _interests
+        ..clear()
+        ..addAll(saved.interests);
+    });
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _prefs.saveTaste(TastePreferences(
+        mainCuisine: _mainCuisine,
+        mealStyle: _mealStyle,
+        flavors: {..._flavors},
+        interests: {..._interests},
+      ));
+      if (mounted) Navigator.pop(context);
+    } on Exception {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't save your taste profile. Try again.")),
+      );
+    }
   }
 
   @override
