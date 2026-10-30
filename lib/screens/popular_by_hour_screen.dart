@@ -5,6 +5,7 @@ import '../models/weekday_searches.dart';
 import '../services/popularity_loader.dart';
 import '../theme/app_colors.dart';
 import '../widgets/count_pill.dart';
+import '../widgets/for_you_section.dart';
 import '../widgets/popular_now_section.dart';
 
 /// "By hour" from Popular right now, the same design as the Kotlin app:
