@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/food_preferences.dart';
+import '../services/preferences_service.dart';
 import '../services/profile_prefs.dart';
 import '../theme/app_colors.dart';
 
@@ -8,7 +9,11 @@ class DietaryPreferencesScreen extends StatefulWidget {
   /// Where the choices are saved; tests pass a fake.
   final ProfilePrefs? prefs;
 
-  const DietaryPreferencesScreen({super.key, this.prefs});
+  /// Also sends the choices to the backend, which needs them to calculate
+  /// the match % of each spot (smart feature). Null: only on the phone.
+  final PreferencesService? preferences;
+
+  const DietaryPreferencesScreen({super.key, this.prefs, this.preferences});
 
   @override
   State<DietaryPreferencesScreen> createState() =>
@@ -99,14 +104,45 @@ class _DietaryPreferencesScreenState
         avoid: {..._avoid},
         allergies: {..._allergies},
       ));
-      if (mounted) Navigator.pop(context);
     } on Exception {
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Couldn't save your preferences. Try again.")),
       );
+      return;
     }
+    final service = widget.preferences;
+    if (service != null) {
+      final sent = await _sendToBackend(service);
+      if (!mounted) return;
+      _message(sent
+          ? 'Dietary preferences saved. Your matches were updated.'
+          : "Saved on this phone, but your matches couldn't be updated. Save again when you're online.");
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  /// The phone copy is already saved; this only fails without connection.
+  Future<bool> _sendToBackend(PreferencesService service) async {
+    try {
+      // Keeps the taste part that the other screen sent.
+      final current = service.current ?? await service.load();
+      await service.save(current.copyWith(
+        diet: _diet,
+        avoid: _avoid.toList(),
+        allergies: _allergies.toList(),
+      ));
+      return true;
+    } on Exception {
+      return false;
+    }
+  }
+
+  void _message(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
   }
 
   @override

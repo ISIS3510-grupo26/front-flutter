@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/user_preferences.dart';
+import '../services/preferences_service.dart';
 import '../theme/app_colors.dart';
 import 'taste_profile_screen.dart';
 import 'dietary_preferences_screen.dart';
@@ -9,15 +11,45 @@ class ProfileScreen extends StatelessWidget {
 
   final VoidCallback? onChangePassword;
 
-  const ProfileScreen({super.key, required this.onSignOut, this.onChangePassword});
+  /// The student's saved preferences. Null keeps the screens local only.
+  final PreferencesService? preferences;
 
-  static const _tasteTags = [
-    'Burgers',
-    'Vegetarian Friendly',
-    'Medium Price',
-    'Quick Bites',
-    'Under 18.000 COP',
-  ];
+  /// Shown under the avatar (the part of the email before the @).
+  final String displayName;
+
+  const ProfileScreen({
+    super.key,
+    required this.onSignOut,
+    this.onChangePassword,
+    this.preferences,
+    this.displayName = 'Student',
+  });
+
+  /// What the student saved, as the tags under "Taste Profile".
+  static List<String> _tasteTags(UserPreferences? prefs) {
+    if (prefs == null || !prefs.saved) return const ['Tap Edit to tell us what you like'];
+    return [
+      if (prefs.mainCuisine != null) prefs.mainCuisine!,
+      if (prefs.mealStyle != null) prefs.mealStyle!,
+      ...prefs.flavors,
+      if (prefs.diet != UserPreferences.noDiet) prefs.diet,
+    ];
+  }
+
+  /// Rebuilds the tags when the student saves new preferences.
+  Widget _buildTasteTags() {
+    Widget tags(UserPreferences? prefs) => Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _tasteTags(prefs).map((tag) => _TasteTag(label: tag)).toList(),
+        );
+    final service = preferences;
+    if (service == null) return tags(null);
+    return ListenableBuilder(
+      listenable: service,
+      builder: (context, _) => tags(service.current),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +65,7 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   _ProfileHeader(onSettingsTap: () {}),
                   const SizedBox(height: 16),
-                  const _ProfileIdentity(),
+                  _ProfileIdentity(name: displayName),
                   const SizedBox(height: 22),
 
                   _SectionTitle(
@@ -43,7 +75,7 @@ class ProfileScreen extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const TasteProfileScreen(),
+                          builder: (_) => TasteProfileScreen(preferences: preferences),
                         ),
                       );
                     },
@@ -51,13 +83,7 @@ class ProfileScreen extends StatelessWidget {
 
                   const SizedBox(height: 10),
 
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _tasteTags
-                        .map((tag) => _TasteTag(label: tag))
-                        .toList(),
-                  ),
+                  _buildTasteTags(),
 
                   const SizedBox(height: 24),
                   const _StatsRow(),
@@ -68,6 +94,7 @@ class ProfileScreen extends StatelessWidget {
                   _SettingsCard(
                     onSignOut: onSignOut,
                     onChangePassword: onChangePassword,
+                    preferences: preferences,
                   ),
                 ],
               ),
@@ -122,7 +149,9 @@ class _ProfileHeader extends StatelessWidget {
 }
 
 class _ProfileIdentity extends StatelessWidget {
-  const _ProfileIdentity();
+  final String name;
+
+  const _ProfileIdentity({required this.name});
 
   @override
   Widget build(BuildContext context) {
@@ -177,9 +206,9 @@ class _ProfileIdentity extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        const Text(
-          'Julian Bierez',
-          style: TextStyle(
+        Text(
+          name,
+          style: const TextStyle(
             fontFamily: 'DMSans',
             fontSize: 20,
             fontWeight: FontWeight.w900,
@@ -523,8 +552,9 @@ class _BadgeItem extends StatelessWidget {
 class _SettingsCard extends StatelessWidget {
   final VoidCallback onSignOut;
   final VoidCallback? onChangePassword;
+  final PreferencesService? preferences;
 
-  const _SettingsCard({required this.onSignOut, this.onChangePassword});
+  const _SettingsCard({required this.onSignOut, this.onChangePassword, this.preferences});
 
   @override
   Widget build(BuildContext context) {
@@ -551,7 +581,7 @@ class _SettingsCard extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) =>
-                      const DietaryPreferencesScreen(),
+                      DietaryPreferencesScreen(preferences: preferences),
                 ),
               );
             },
