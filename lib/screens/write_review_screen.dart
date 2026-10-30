@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../models/spot_detail.dart';
 import '../repositories/api_exception.dart';
 import '../repositories/spots_repository.dart';
 import '../theme/app_colors.dart';

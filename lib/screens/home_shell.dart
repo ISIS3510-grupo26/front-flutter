@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/telemetry_event.dart';
 import '../repositories/favorites_repository.dart';
@@ -15,6 +16,11 @@ import '../services/recommendations_service_adapter.dart';
 import '../services/taste_map_loader.dart';
 import '../services/taste_map_prefs.dart';
 import '../services/telemetry_queue.dart';
+import '../repositories/matches_repository.dart';
+import '../repositories/wait_times_repository.dart';
+import '../services/preferences_service.dart';
+import '../services/shake_detector.dart';
+import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
 import 'change_password_screen.dart';
@@ -23,6 +29,7 @@ import 'place_detail_screen.dart';
 import 'saved_places_screen.dart';
 import 'taste_map_screen.dart';
 import 'profile_screen.dart';
+import 'wait_times_screen.dart';
 
 /// Hosts the four main tabs and wires up the app's services for the current
 /// user. The For You feed and Saved Places both render
@@ -64,15 +71,81 @@ class _HomeShellState extends State<HomeShell> {
     service: PopularityServiceAdapter(client: _http),
     prefs: PopularityPrefs(),
   );
+  late final _matches = MatchesRepository(client: _http);
+  late final _waitTimes = WaitTimesRepository(client: _http);
+  late final _preferences = PreferencesService(
+    repository: _matches,
+    currentUserId: () => widget.session.userId,
+  );
+  // Its own client: the weather service is a third party and must never get the token.
+  final _weatherHttp = http.Client();
+  late final _weatherService = WeatherService(client: _weatherHttp);
+  final _shake = ShakeDetector();
+
+  /// Smart feature: compatibility per spot for this student. Null until it
+  /// loads (or if it fails); then the feed keeps the catalog percentage.
+  Map<String, int>? _matchScores;
+  WeatherNow? _weather;
+
+  /// The accelerometer is only on while the app is in the foreground.
+  bool _appInForeground = true;
+  late final AppLifecycleListener _lifecycle;
 
   @override
   void initState() {
     super.initState();
     _syncFavorites();
+    _lifecycle = AppLifecycleListener(onStateChange: _onAppStateChange);
+    // Every time the preferences load or change, the percentages are recalculated.
+    _preferences.addListener(_loadMatches);
+    _loadPreferences();
+    _loadWeather();
   }
+
+  Future<void> _loadPreferences() async {
+    try {
+      await _preferences.load(); // notifies -> _loadMatches
+    } on Exception {
+      _loadMatches(); // the profile tags stay empty, but the feed can still get its percentages
+    }
+  }
+
+  Future<void> _loadMatches() async {
+    final userId = widget.session.userId;
+    if (userId == null) return;
+    try {
+      final scores = await _matches.fetchMatches(userId);
+      if (mounted) setState(() => _matchScores = scores);
+    } on Exception {
+      // Without a connection the feed shows the catalog percentage.
+    }
+  }
+
+  void _onAppStateChange(AppLifecycleState state) {
+    final resumed = state == AppLifecycleState.resumed;
+    if (resumed && !_appInForeground) _loadWeather(); // back in the app: the weather may have changed
+    setState(() => _appInForeground = resumed);
+  }
+
+  Future<void> _loadWeather() async {
+    final weather = await _weatherService.current();
+    if (mounted) setState(() => _weather = weather);
+  }
+
+  String get _displayName => switch (widget.session.state) {
+        AuthSignedIn(:final user) => user.email.split('@').first,
+        AuthDevUser(:final userId) => userId,
+        _ => 'Student',
+      };
 
   @override
   void dispose() {
+    _shake.stop();
+    _lifecycle.dispose();
+    _weatherHttp.close();
+    _preferences
+      ..removeListener(_loadMatches)
+      ..dispose();
     _favorites.dispose();
     _telemetry.dispose();
     _http.close();
@@ -95,8 +168,8 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  void _openSpot(String id) {
-    Navigator.push(
+  Future<void> _openSpot(String id) async {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => PlaceDetailScreen(
@@ -109,6 +182,14 @@ class _HomeShellState extends State<HomeShell> {
           onToggleSaved: _toggleSaved,
         ),
       ),
+    );
+    _loadMatches(); // a new review changes "Something new" and what similar students think
+  }
+
+  void _openWaitTimes() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => WaitTimesScreen(repository: _waitTimes, onOpenSpot: _openSpot)),
     );
   }
 
@@ -152,6 +233,11 @@ class _HomeShellState extends State<HomeShell> {
               onOpenSpot: _openSpot,
               onOpenFromSearch: _openFromSearch,
               popularLoader: _popularLoader,
+              matchScores: _matchScores,
+              weather: _weather,
+              shakeDetector: _shake,
+              shakeActive: _index == 0 && _appInForeground,
+              onOpenWaitTimes: _openWaitTimes,
             ),
             TasteMapScreen(
               loader: _tasteMapLoader,
@@ -172,6 +258,8 @@ class _HomeShellState extends State<HomeShell> {
               onChangePassword: widget.session.state is AuthSignedIn
                   ? _openChangePassword
                   : null,
+              preferences: _preferences,
+              displayName: _displayName,
             ),
           ],
         ),
