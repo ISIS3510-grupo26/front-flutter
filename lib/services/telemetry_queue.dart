@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -38,6 +39,9 @@ class DeviceContext {
 /// the backend answers for it, and [restore] puts back what a previous run
 /// could not send. Without one (tests), events are lost if the app is killed
 /// before they are sent.
+///
+/// With a connectivity stream, the queue is sent as soon as the phone is back
+/// online; the timer stays as a fallback.
 class TelemetryQueue {
   static const _maxBatch = 100;
   static const _maxQueued = 500;
@@ -48,19 +52,37 @@ class TelemetryQueue {
   final TelemetryStore? _store;
   late final Future<DeviceContext> _device = _loadDevice();
   late final Timer _timer;
+  late final StreamSubscription<List<ConnectivityResult>>? _connectivity;
 
   final _queue = <TelemetryEvent>[];
   bool _flushing = false;
   Future<void>? _restoring;
 
+  /// Unknown until the stream's first value, which counts as coming back
+  /// online: that first value also sends what [restore] put back.
+  bool _online = false;
+
+  /// [connectivity] is `Connectivity().onConnectivityChanged`; tests pass
+  /// their own stream.
   TelemetryQueue({
     required this._client,
     this._baseUrl = ApiConfig.baseUrl,
     this._loadDevice = DeviceContext.load,
     this._store,
+    Stream<List<ConnectivityResult>>? connectivity,
     Duration flushInterval = const Duration(seconds: 15),
   }) {
     _timer = Timer.periodic(flushInterval, (_) => flush());
+    _connectivity = connectivity?.listen(_onConnectivityChanged);
+  }
+
+  /// Multithreading strategy: Stream. Eventual connectivity: what was queued
+  /// offline goes out when the connection comes back, without waiting up to
+  /// a whole timer interval.
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    final online = results.any((r) => r != ConnectivityResult.none);
+    if (online && !_online) flush();
+    _online = online;
   }
 
   int get pending => _queue.length;
@@ -160,5 +182,8 @@ class TelemetryQueue {
     }
   }
 
-  void dispose() => _timer.cancel();
+  void dispose() {
+    _timer.cancel();
+    _connectivity?.cancel();
+  }
 }

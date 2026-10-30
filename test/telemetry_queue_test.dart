@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:campus_bites/models/telemetry_event.dart';
 import 'package:campus_bites/services/telemetry_queue.dart';
 import 'package:campus_bites/services/telemetry_store.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -82,6 +84,39 @@ void main() {
   test('does nothing when the queue is empty', () async {
     await queue.flush();
     expect(requests, isEmpty);
+  });
+
+  test('sends the queue as soon as the phone is back online', () async {
+    final connectivity = StreamController<List<ConnectivityResult>>();
+    final online = TelemetryQueue(
+      baseUrl: 'http://api.test/api/v1',
+      loadDevice: () async =>
+          const DeviceContext(model: 'SM-S906U1', osVersion: '15'),
+      flushInterval: const Duration(hours: 1),
+      connectivity: connectivity.stream,
+      client: MockClient((request) async {
+        requests.add(request);
+        return http.Response('{}', status);
+      }),
+    )..enqueue(event());
+
+    connectivity.add([ConnectivityResult.none]);
+    await pumpEventQueue();
+    expect(requests, isEmpty);
+
+    connectivity.add([ConnectivityResult.wifi]);
+    await pumpEventQueue();
+    expect(requests, hasLength(1));
+    expect(online.pending, 0);
+
+    // Switching from wifi to mobile data is not coming back online.
+    online.enqueue(event());
+    connectivity.add([ConnectivityResult.mobile]);
+    await pumpEventQueue();
+    expect(requests, hasLength(1));
+
+    online.dispose();
+    expect(connectivity.hasListener, isFalse);
   });
 
   group('saved on disk', () {
