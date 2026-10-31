@@ -14,6 +14,7 @@ import '../repositories/spots_repository.dart';
 import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
 import '../services/place_detail_loader.dart';
+import '../services/review_submitter.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
 import '../widgets/offline_banner.dart';
@@ -34,6 +35,9 @@ class PlaceDetailScreen extends StatefulWidget {
 
   /// Saved copies of the pages, for offline use.
   final SpotDetailStorage storage;
+  
+  /// Publishes reviews (BQ13) and keeps their drafts on the phone.
+  final ReviewSubmitter reviewSubmitter;
 
   const PlaceDetailScreen({
     super.key,
@@ -44,6 +48,7 @@ class PlaceDetailScreen extends StatefulWidget {
     required this.canReview,
     required this.favorites,
     required this.onToggleSaved,
+    required this.reviewSubmitter,
     this.storage = const SqliteSpotDetailStorage(),
   });
 
@@ -173,11 +178,15 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
         builder: (_) => WriteReviewScreen(
           spotId: spot.id,
           spotName: spot.name,
-          repository: widget.repository,
+          submitter: widget.reviewSubmitter,
         ),
       ),
     );
-    if (result == null || !mounted) return;
+        if (!mounted) return;
+    if (result == null) {
+      setState(() {}); // there may be a draft now, the button changes to "Continue your review"
+      return;
+    }
     setState(() => _reviewed = true);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Thanks! Your review was published.')),
@@ -502,6 +511,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                   onWrite: widget.canReview && !_reviewed ? () => _writeReview(spot) : null,
                   hint: widget.canReview ? null : 'Sign in with an account to leave a review.',
                   offline: _offlineSavedAt != null,
+                  hasDraft: widget.reviewSubmitter.store.hasDraft(spot.id),
                 ),
                 const SizedBox(height: 10),
                 for (final review in spot.reviews) ...[
@@ -562,12 +572,16 @@ class _ReviewsHeader extends StatelessWidget {
 
   /// Showing saved data: the write button stays visible but disabled.
   final bool offline;
+  
+  /// The student left a review half written here (saved in Hive).
+  final bool hasDraft;
 
   const _ReviewsHeader({
     required this.totalReviews,
     required this.onWrite,
     this.hint,
     this.offline = false,
+    this.hasDraft = false,
   });
 
   @override
@@ -597,9 +611,9 @@ class _ReviewsHeader extends StatelessWidget {
               TextButton.icon(
                 onPressed: onWrite,
                 icon: const Icon(Icons.rate_review_outlined, size: 18, color: AppColors.tomato),
-                label: const Text(
-                  'Rate it',
-                  style: TextStyle(color: AppColors.tomato, fontWeight: FontWeight.w700),
+                label: Text(
+                  hasDraft ? 'Continue your review' : 'Rate it',
+                  style: const TextStyle(color: AppColors.tomato, fontWeight: FontWeight.w700),
                 ),
               ),
           ],
