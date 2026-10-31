@@ -13,10 +13,10 @@ import 'telemetry_queue.dart';
 ///
 /// While the phone is offline, BQ14 map events are appended to
 /// `map_events.json` in the app documents directory (one JSON event per
-/// line) instead of the in-memory [TelemetryQueue], which loses events when
-/// the app is closed. When the connection comes back, and when the Taste Map
-/// opens, every saved event is enqueued in the [TelemetryQueue] and the file
-/// is deleted. So BQ14 data survives offline use and app restarts.
+/// line) instead of the [TelemetryQueue]. When the connection comes back, and
+/// when the Taste Map opens, every saved event is enqueued in the
+/// [TelemetryQueue], which keeps it on disk until it is sent, and the file is
+/// deleted. So BQ14 data survives offline use and app restarts.
 class MapEventOutbox {
   static const fileName = 'map_events.json';
 
@@ -45,17 +45,19 @@ class MapEventOutbox {
     // Renamed first, so an event appended meanwhile starts a new file instead
     // of being deleted with this one.
     final sending = await file.rename('${file.path}.sending');
-    var forwarded = 0;
+    final events = <TelemetryEvent>[];
     for (final line in await sending.readAsLines()) {
       if (line.trim().isEmpty) continue;
       try {
-        queue.enqueue(TelemetryEvent.fromJson(jsonDecode(line) as Map<String, dynamic>));
-        forwarded++;
+        events.add(TelemetryEvent.fromJson(jsonDecode(line) as Map<String, dynamic>));
       } catch (e) {
         debugPrint('Skipping a broken BQ14 event: $e');
       }
     }
+    // Deleted only once the queue saved the events in its own file, so closing
+    // the app in between loses nothing.
+    await queue.enqueueAll(events);
     await sending.delete();
-    return forwarded;
+    return events.length;
   }
 }

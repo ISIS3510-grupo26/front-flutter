@@ -3,9 +3,27 @@ import 'dart:io';
 import 'package:campus_bites/models/telemetry_event.dart';
 import 'package:campus_bites/services/map_event_outbox.dart';
 import 'package:campus_bites/services/telemetry_queue.dart';
+import 'package:campus_bites/services/telemetry_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+
+/// A disk that takes a while to save, so the test can't pass by luck.
+class _SlowStore implements TelemetryStore {
+  final saved = <String>[];
+
+  @override
+  Future<void> append(TelemetryEvent event) async {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    saved.add(event.eventId);
+  }
+
+  @override
+  Future<List<TelemetryEvent>> load() async => [];
+
+  @override
+  Future<void> remove(Iterable<String> eventIds) async {}
+}
 
 void main() {
   late Directory directory;
@@ -82,6 +100,26 @@ void main() {
     expect(sentBody, contains('"eventId":"${original.eventId}"'));
     expect(sentBody, contains('"screen":"map_display"'));
     expect(sentBody, contains('"errorType":"invalid_coordinates"'));
+  });
+
+  test('the file is deleted only after the queue saved the events', () async {
+    final saved = event('load_failed');
+    await outbox.append(saved);
+    final store = _SlowStore();
+    final persistent = TelemetryQueue(
+      baseUrl: 'http://api.test/api/v1',
+      loadDevice: () async => const DeviceContext(model: 'Pixel 7', osVersion: '14'),
+      flushInterval: const Duration(hours: 1),
+      store: store,
+      client: MockClient((_) async => http.Response('{}', 503)),
+    );
+    addTearDown(persistent.dispose);
+
+    await outbox.forwardTo(persistent);
+
+    // The app could be closed right now: the event must be saved already.
+    expect(store.saved, [saved.eventId]);
+    expect(directory.listSync(), isEmpty);
   });
 
   test('nothing saved forwards nothing', () async {

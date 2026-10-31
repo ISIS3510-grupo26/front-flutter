@@ -1,12 +1,18 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
+import '../models/best_for_you.dart';
 import '../models/spot.dart';
+import '../services/best_for_you_loader.dart';
 import '../services/popularity_loader.dart';
 import '../services/shake_detector.dart';
 import '../services/shake_picker.dart';
 import '../services/weather_context.dart';
 import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/best_for_you_section.dart';
 import '../widgets/filter_chip_pill.dart';
 import '../widgets/popular_now_section.dart';
 import '../widgets/spot_card.dart';
@@ -37,6 +43,15 @@ class ForYouScreen extends StatefulWidget {
   /// Opens BQ4 ("Wait times now"). Null hides the banner.
   final VoidCallback? onOpenWaitTimes;
 
+  /// BQ6 ("Best for you right now") for [bestForYouProfile]. Null hides the
+  /// section.
+  final BestForYouLoader? bestForYouLoader;
+  final BestForYouProfile bestForYouProfile;
+
+  /// `Connectivity().onConnectivityChanged`: when the connection comes back,
+  /// the sections reload by themselves. Tests leave it null.
+  final Stream<List<ConnectivityResult>>? connectivity;
+
   const ForYouScreen({
     super.key,
     required this.spots,
@@ -49,6 +64,9 @@ class ForYouScreen extends StatefulWidget {
     this.shakeDetector,
     this.shakeActive = false,
     this.onOpenWaitTimes,
+    this.bestForYouLoader,
+    this.bestForYouProfile = BestForYouProfile.none,
+    this.connectivity,
   });
 
   @override
@@ -59,6 +77,9 @@ class _ForYouScreenState extends State<ForYouScreen> {
   final Set<FeedFilterType> _activeFilters = {FeedFilterType.inARush};
   final _search = TextEditingController();
   PopularityState _popular = const PopularityLoading();
+  BestForYouState _best = const BestForYouLoading();
+  StreamSubscription<List<ConnectivityResult>>? _connectivity;
+  bool _online = true;
 
   /// The student chose "Usual order" while it rains.
   bool _ignoreWeather = false;
@@ -67,16 +88,17 @@ class _ForYouScreenState extends State<ForYouScreen> {
   List<Spot> _feed = const [];
   bool _pickOpen = false;
 
-  /// Coming back to the app reloads the section: within 5 minutes it comes
-  /// from the LRU cache, and after the hour changes it shows the new hour.
+  /// Coming back to the app reloads the sections: recent data comes from
+  /// their LRU caches, and after the hour changes Popular shows the new hour.
   late final AppLifecycleListener _lifecycle;
 
   @override
   void initState() {
     super.initState();
-    _lifecycle = AppLifecycleListener(onResume: _loadPopular);
+    _lifecycle = AppLifecycleListener(onResume: _loadSections);
+    _connectivity = widget.connectivity?.listen(_onConnectivityChanged);
     _search.addListener(() => setState(() {}));
-    _loadPopular();
+    _loadSections();
     _syncShake();
   }
 
@@ -87,14 +109,35 @@ class _ForYouScreenState extends State<ForYouScreen> {
       old.shakeDetector?.stop();
       _syncShake();
     }
+    // The student saved a new Taste Profile or Dietary Preferences.
+    if (old.bestForYouProfile != widget.bestForYouProfile) _loadBest();
   }
 
   @override
   void dispose() {
     widget.shakeDetector?.stop();
     _lifecycle.dispose();
+    _connectivity?.cancel();
     _search.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSections({bool forceRefresh = false}) async {
+    await Future.wait([
+      _loadPopular(forceRefresh: forceRefresh),
+      _loadBest(forceRefresh: forceRefresh),
+    ]);
+  }
+
+  /// Multithreading strategy: Stream. Eventual connectivity: when the
+  /// connection comes back, both sections reload from the network by
+  /// themselves, so saved data or an offline message is replaced without
+  /// the student pulling down.
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    final online = results.any((r) => r != ConnectivityResult.none);
+    final cameBack = online && !_online;
+    _online = online;
+    if (cameBack) _loadSections(forceRefresh: true);
   }
 
   /// Keeps the current section on screen until the new ranking arrives.
@@ -106,6 +149,22 @@ class _ForYouScreenState extends State<ForYouScreen> {
   void _retryPopular() {
     setState(() => _popular = const PopularityLoading());
     _loadPopular();
+  }
+
+  Future<void> _loadBest({bool forceRefresh = false}) async {
+    final loader = widget.bestForYouLoader;
+    if (loader == null) return;
+    final profile = widget.bestForYouProfile;
+    final state = await loader.load(profile, forceRefresh: forceRefresh);
+    // A ranking for a profile the student already changed is stale.
+    if (mounted && profile == widget.bestForYouProfile) {
+      setState(() => _best = state);
+    }
+  }
+
+  void _retryBest() {
+    setState(() => _best = const BestForYouLoading());
+    _loadBest();
   }
 
   void _openPopularByHour() {
@@ -191,7 +250,7 @@ class _ForYouScreenState extends State<ForYouScreen> {
     return SafeArea(
       bottom: false,
       child: RefreshIndicator(
-        onRefresh: () => _loadPopular(forceRefresh: true),
+        onRefresh: () => _loadSections(forceRefresh: true),
         color: AppColors.tomato,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -286,6 +345,14 @@ class _ForYouScreenState extends State<ForYouScreen> {
                 ),
               ),
             ),
+            if (!searching && widget.bestForYouLoader != null)
+              SliverToBoxAdapter(
+                child: BestForYouSection(
+                  state: _best,
+                  onRetry: _retryBest,
+                  onOpenSpot: widget.onOpenSpot,
+                ),
+              ),
             if (!searching)
               SliverToBoxAdapter(
                 child: PopularNowSection(
