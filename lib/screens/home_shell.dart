@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -16,6 +17,7 @@ import '../services/recommendations_service_adapter.dart';
 import '../services/taste_map_loader.dart';
 import '../services/taste_map_prefs.dart';
 import '../services/telemetry_queue.dart';
+import '../services/telemetry_store.dart';
 import '../repositories/matches_repository.dart';
 import '../repositories/wait_times_repository.dart';
 import '../services/preferences_service.dart';
@@ -50,7 +52,11 @@ class _HomeShellState extends State<HomeShell> {
   late final _http = AuthClient(widget.session);
   late final _api = FavoritesRepository(client: _http);
   late final _spots = SpotsRepository(client: _http);
-  late final _telemetry = TelemetryQueue(client: _http);
+  late final _telemetry = TelemetryQueue(
+    client: _http,
+    store: FileTelemetryStore(),
+    connectivity: Connectivity().onConnectivityChanged,
+  );
   late final _favorites = FavoritesController(
     repository: _api,
     telemetry: _telemetry,
@@ -94,12 +100,22 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    _restoreTelemetry();
     _syncFavorites();
-    _lifecycle = AppLifecycleListener(onStateChange: _onAppStateChange);
+    _lifecycle =AppLifecycleListener(onStateChange: _onAppStateChange);
     // Every time the preferences load or change, the percentages are recalculated.
     _preferences.addListener(_loadMatches);
     _loadPreferences();
     _loadWeather();
+  }
+
+  /// Future with handler: the events the last session couldn't send are read
+  /// from disk without blocking the first frame, then sent right away.
+  void _restoreTelemetry() {
+    _telemetry
+        .restore()
+        .then((_) => _telemetry.flush())
+        .catchError((Object e) => debugPrint("Couldn't resend saved telemetry: $e"));
   }
 
   Future<void> _loadPreferences() async {
