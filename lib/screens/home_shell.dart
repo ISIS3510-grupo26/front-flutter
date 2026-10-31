@@ -2,11 +2,14 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../models/best_for_you.dart';
 import '../models/telemetry_event.dart';
 import '../repositories/favorites_repository.dart';
 import '../repositories/spots_repository.dart';
 import '../services/auth_client.dart';
 import '../services/auth_session.dart';
+import '../services/best_for_you_loader.dart';
+import '../services/best_for_you_service.dart';
 import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
 import '../services/nearby_favorites_loader.dart';
@@ -76,6 +79,10 @@ class _HomeShellState extends State<HomeShell> {
   late final _popularLoader = PopularityLoader(
     service: PopularityServiceAdapter(client: _http),
     prefs: PopularityPrefs(),
+  );
+  late final _bestForYouLoader = BestForYouLoader(
+    service: BestForYouServiceAdapter(client: _http),
+    storage: const SqliteBestForYouStorage(),
   );
   late final _matches = MatchesRepository(client: _http);
   late final _waitTimes = WaitTimesRepository(client: _http);
@@ -239,7 +246,8 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       backgroundColor: AppColors.cream,
       body: ListenableBuilder(
-        listenable: _favorites,
+        // Preferences too: saving Taste Profile changes what BQ6 asks for.
+        listenable: Listenable.merge([_favorites, _preferences]),
         builder: (context, _) => IndexedStack(
           index: _index,
           children: [
@@ -254,6 +262,9 @@ class _HomeShellState extends State<HomeShell> {
               shakeDetector: _shake,
               shakeActive: _index == 0 && _appInForeground,
               onOpenWaitTimes: _openWaitTimes,
+              bestForYouLoader: _bestForYouLoader,
+              bestForYouProfile: BestForYouProfile.from(_preferences.current),
+              connectivity: Connectivity().onConnectivityChanged,
             ),
             TasteMapScreen(
               loader: _tasteMapLoader,
