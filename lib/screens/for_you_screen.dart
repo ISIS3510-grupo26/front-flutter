@@ -14,6 +14,7 @@ import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/best_for_you_section.dart';
 import '../widgets/filter_chip_pill.dart';
+import '../widgets/offline_banner.dart';
 import '../widgets/popular_now_section.dart';
 import '../widgets/spot_card.dart';
 import 'popular_by_hour_screen.dart';
@@ -31,6 +32,10 @@ class ForYouScreen extends StatefulWidget {
   /// student, keyed by spot id. It replaces the catalog's fixed percentage
   /// and the feed is sorted by it.
   final Map<String, int>? matchScores;
+
+  /// Set when [matchScores] are the ones saved on the phone because there's
+  /// no connection: when they were saved.
+  final DateTime? matchesOfflineSince;
 
   /// Weather on campus from the external service. Null = unknown.
   final WeatherNow? weather;
@@ -60,6 +65,7 @@ class ForYouScreen extends StatefulWidget {
     this.onOpenSpot,
     this.onOpenFromSearch,
     this.matchScores,
+    this.matchesOfflineSince,
     this.weather,
     this.shakeDetector,
     this.shakeActive = false,
@@ -291,6 +297,10 @@ class _ForYouScreenState extends State<ForYouScreen> {
                         height: 1.3,
                       ),
                     ),
+                                        if (widget.matchesOfflineSince case final savedAt?) ...[
+                      const SizedBox(height: 12),
+                      OfflineBanner(message: 'Offline · match % from ${hourMinute(savedAt)}'),
+                    ],
                     if (widget.weather case final w?) ...[
                       const SizedBox(height: 12),
                       _WeatherChip(weather: w),

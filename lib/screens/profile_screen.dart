@@ -600,15 +600,6 @@ class _SettingsCard extends StatelessWidget {
             height: 1,
             color: AppColors.border,
           ),
-          const _ProfileMenuRow(
-            icon: Icons.notifications_none,
-            iconBackground: AppColors.surface,
-            title: 'Notifications',
-          ),
-          const Divider(
-            height: 1,
-            color: AppColors.border,
-          ),
           if (onChangePassword != null) ...[
             _ProfileMenuRow(
               icon: Icons.lock_outline,

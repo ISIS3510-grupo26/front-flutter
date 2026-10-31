@@ -61,6 +61,20 @@ class TelemetryEvent {
         httpStatus = null,
         occurredAt = DateTime.now().toUtc();
 
+  /// BQ13: one attempt to publish a review.
+  TelemetryEvent.reviewSubmit({
+    required String attemptId,
+    required String this.spotId,
+    this.userId,
+    required this.success,
+    required this.durationMs,
+    required DateTime startedAt,
+    this.httpStatus,
+    this.errorType,
+  })  : eventId = attemptId,
+        screen = 'review_submit',
+        occurredAt = startedAt.toUtc();
+
   /// Reads back an event written with [toJson] (the BQ14 offline outbox).
   /// Keeps the same eventId, so a resend is never counted twice.
   TelemetryEvent.fromJson(Map<String, dynamic> json)
@@ -87,6 +101,9 @@ class TelemetryEvent {
       };
 
   static final _random = Random.secure();
+
+  /// A new random id (also used for review attempts, BQ13).
+  static String newId() => _newEventId();
 
   static String _newEventId() => [
         for (var i = 0; i < 16; i++)

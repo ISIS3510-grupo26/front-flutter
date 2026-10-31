@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -21,6 +22,10 @@ import '../services/taste_map_loader.dart';
 import '../services/taste_map_prefs.dart';
 import '../services/telemetry_queue.dart';
 import '../services/telemetry_store.dart';
+import '../services/hive_store.dart';
+import '../services/match_scores_cache.dart';
+import '../services/review_event_outbox.dart';
+import '../services/review_submitter.dart';
 import '../repositories/matches_repository.dart';
 import '../repositories/wait_times_repository.dart';
 import '../services/preferences_service.dart';
@@ -43,7 +48,10 @@ import 'wait_times_screen.dart';
 class HomeShell extends StatefulWidget {
   final AuthSession session;
 
-  const HomeShell({super.key, required this.session});
+  /// Hive boxes opened in main(): review drafts, BQ13 events and match scores.
+  final HiveStore store;
+
+  const HomeShell({super.key, required this.session, required this.store});
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -86,6 +94,21 @@ class _HomeShellState extends State<HomeShell> {
   );
   late final _matches = MatchesRepository(client: _http);
   late final _waitTimes = WaitTimesRepository(client: _http);
+  // BQ13 events saved in Hive until the backend gets them,
+  // reviews that record every attempt, and the cached compatibility %.
+  late final _reviewEvents = ReviewEventOutbox(
+    client: _http,
+    store: widget.store,
+    currentUserId: () => widget.session.userId,
+  );
+  late final _reviewSubmitter = ReviewSubmitter(
+    repository: _spots,
+    store: widget.store,
+    currentUserId: () => widget.session.userId,
+    onAttemptRecorded: _reviewEvents.flush,
+  );
+  late final _matchCache = MatchScoresCache(repository: _matches, store: widget.store);
+  late final StreamSubscription<List<ConnectivityResult>> _connectionChanges;
   late final _preferences = PreferencesService(
     repository: _matches,
     currentUserId: () => widget.session.userId,
@@ -97,7 +120,7 @@ class _HomeShellState extends State<HomeShell> {
 
   /// Smart feature: compatibility per spot for this student. Null until it
   /// loads (or if it fails); then the feed keeps the catalog percentage.
-  Map<String, int>? _matchScores;
+  MatchScores? _matchScores;
   WeatherNow? _weather;
 
   /// The accelerometer is only on while the app is in the foreground.
@@ -114,6 +137,16 @@ class _HomeShellState extends State<HomeShell> {
     _preferences.addListener(_loadMatches);
     _loadPreferences();
     _loadWeather();
+    _reviewEvents.flush(); // BQ13 events left from before (crashes found in main, offline attempts)
+    _connectionChanges = Connectivity().onConnectivityChanged.listen(_onConnectionChanged);
+  }
+
+  /// When the connection comes back: send the saved BQ13 events, and if the feed is showing saved percentages, 
+  /// ask for the new ones.
+  void _onConnectionChanged(List<ConnectivityResult> results) {
+    if (results.every((r) => r == ConnectivityResult.none)) return;
+    _reviewEvents.flush();
+    if (_matchScores?.offline ?? false) _loadMatches(force: false);
   }
 
   /// Future with handler: the events the last session couldn't send are read
@@ -133,14 +166,19 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  Future<void> _loadMatches() async {
+  /// Stale-while-revalidate: the first value is the saved one (instant) and
+  /// the second the one from the backend. By default it always asks again,
+  /// because it runs after the preferences change or after a new review.
+  Future<void> _loadMatches({bool force = true}) async {
     final userId = widget.session.userId;
     if (userId == null) return;
     try {
-      final scores = await _matches.fetchMatches(userId);
-      if (mounted) setState(() => _matchScores = scores);
+      await for (final matches in _matchCache.load(userId, force: force)) {
+        if (!mounted) return;
+        setState(() => _matchScores = matches);
+      }
     } on Exception {
-      // Without a connection the feed shows the catalog percentage.
+      // Nothing saved and no answer: the feed keeps the catalog percentage.
     }
   }
 
@@ -164,6 +202,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _shake.stop();
+    _connectionChanges.cancel();
     _lifecycle.dispose();
     _weatherHttp.close();
     _preferences
@@ -203,6 +242,7 @@ class _HomeShellState extends State<HomeShell> {
           canReview: widget.session.state is AuthSignedIn,
           favorites: _favorites,
           onToggleSaved: _toggleSaved,
+          reviewSubmitter: _reviewSubmitter,
         ),
       ),
     );
@@ -257,7 +297,8 @@ class _HomeShellState extends State<HomeShell> {
               onOpenSpot: _openSpot,
               onOpenFromSearch: _openFromSearch,
               popularLoader: _popularLoader,
-              matchScores: _matchScores,
+              matchScores: _matchScores?.scores,
+              matchesOfflineSince: (_matchScores?.offline ?? false) ? _matchScores!.savedAt : null,
               weather: _weather,
               shakeDetector: _shake,
               shakeActive: _index == 0 && _appInForeground,
