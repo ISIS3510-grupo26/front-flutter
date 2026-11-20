@@ -26,9 +26,11 @@ import '../services/hive_store.dart';
 import '../services/match_scores_cache.dart';
 import '../services/review_event_outbox.dart';
 import '../services/review_submitter.dart';
+import '../services/wait_times_store.dart';
 import '../repositories/matches_repository.dart';
 import '../repositories/wait_times_repository.dart';
 import '../services/preferences_service.dart';
+import '../services/preferences_sync.dart';
 import '../services/shake_detector.dart';
 import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
@@ -94,6 +96,7 @@ class _HomeShellState extends State<HomeShell> {
   );
   late final _matches = MatchesRepository(client: _http);
   late final _waitTimes = WaitTimesRepository(client: _http);
+  final _waitStore = WaitTimesStore();
   // BQ13 events saved in Hive until the backend gets them,
   // reviews that record every attempt, and the cached compatibility %.
   late final _reviewEvents = ReviewEventOutbox(
@@ -113,6 +116,7 @@ class _HomeShellState extends State<HomeShell> {
     repository: _matches,
     currentUserId: () => widget.session.userId,
   );
+  final _preferencesSync = PreferencesSync();
   // Its own client: the weather service is a third party and must never get the token.
   final _weatherHttp = http.Client();
   late final _weatherService = WeatherService(client: _weatherHttp);
@@ -138,15 +142,29 @@ class _HomeShellState extends State<HomeShell> {
     _loadPreferences();
     _loadWeather();
     _reviewEvents.flush(); // BQ13 events left from before (crashes found in main, offline attempts)
+    _sendSavedWaitReports();
     _connectionChanges = Connectivity().onConnectivityChanged.listen(_onConnectionChanged);
   }
 
   /// When the connection comes back: send the saved BQ13 events, and if the feed is showing saved percentages, 
   /// ask for the new ones.
-  void _onConnectionChanged(List<ConnectivityResult> results) {
+    void _onConnectionChanged(List<ConnectivityResult> results) {
     if (results.every((r) => r == ConnectivityResult.none)) return;
     _reviewEvents.flush();
+    _sendSavedWaitReports();
+    _syncPreferences();
     if (_matchScores?.offline ?? false) _loadMatches(force: false);
+  }
+
+  /// Wait times reported offline: they are sent even if the student never
+  /// opens that screen again. If it fails they stay saved for the next time.
+  void _sendSavedWaitReports() {
+    _waitStore
+        .flush(_waitTimes)
+        .then((sent) {
+          if (sent > 0) debugPrint('Sent $sent saved wait time reports');
+        })
+        .catchError((Object e) => debugPrint("Couldn't send the saved wait times: $e"));
   }
 
   /// Future with handler: the events the last session couldn't send are read
@@ -158,11 +176,28 @@ class _HomeShellState extends State<HomeShell> {
         .catchError((Object e) => debugPrint("Couldn't resend saved telemetry: $e"));
   }
 
-  Future<void> _loadPreferences() async {
+    Future<void> _loadPreferences() async {
     try {
       await _preferences.load(); // notifies -> _loadMatches
+      _syncPreferences();
     } on Exception {
-      _loadMatches(); // the profile tags stay empty, but the feed can still get its percentages
+      // Offline: the profile and the feed use what was saved on this phone.
+      final fromPhone = await _preferencesSync.phoneCopy().catchError((Object e) => null);
+      if (fromPhone != null) {
+        _preferences.useCopyFromPhone(fromPhone); // notifies -> _loadMatches
+      } else {
+        _loadMatches(); // nothing saved here either, but the feed can still get its percentages
+      }
+    }
+  }
+
+  /// Sends the preferences saved offline (saving notifies, so the feed recalculates). 
+  Future<void> _syncPreferences() async {
+    try {
+      final sent = await _preferencesSync.syncIfNeeded(_preferences);
+      if (!sent && _preferences.onlyOnPhone) await _preferences.load();
+    } catch (e) {
+      debugPrint("Couldn't sync the preferences: $e"); // they stay pending for the next reconnection
     }
   }
 
@@ -252,7 +287,7 @@ class _HomeShellState extends State<HomeShell> {
   void _openWaitTimes() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => WaitTimesScreen(repository: _waitTimes, onOpenSpot: _openSpot)),
+      MaterialPageRoute(builder: (_) => WaitTimesScreen(repository: _waitTimes, store: _waitStore, onOpenSpot: _openSpot)),
     );
   }
 
@@ -327,6 +362,7 @@ class _HomeShellState extends State<HomeShell> {
                   ? _openChangePassword
                   : null,
               preferences: _preferences,
+              preferencesSync: _preferencesSync,
               displayName: _displayName,
             ),
           ],

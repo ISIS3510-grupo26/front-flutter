@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -21,10 +23,8 @@ class WaitTimesRepository {
         .replace(queryParameters: {'freshMinutes': '$freshMinutes'});
     final response = await _client.get(uri).timeout(apiTimeout);
     expectStatus(response, 200);
-    final body = decodeJson(response) as Map<String, dynamic>;
-    return [
-      for (final item in body['spots'] as List<dynamic>) LastWaitTime.fromJson(item as Map<String, dynamic>),
-    ];
+    final body = response.bodyBytes;
+    return Isolate.run(() => parseLatestWaitTimes(body));
   }
 
   /// Sending the same [report] twice is safe, the backend ignores a report id
@@ -39,4 +39,16 @@ class WaitTimesRepository {
         .timeout(apiTimeout);
     expectStatus(response, 201);
   }
+}
+
+
+/// Multithreading strategy: Isolate. [WaitTimesRepository.fetchLatest] runs this with `Isolate.run()`, so 
+/// decoding the JSON and building the list of every restaurant happen off the UI thread and the screen never 
+/// stutters while it loads. It is a top-level function so the isolate only receives the response bytes, not 
+/// the repository.
+List<LastWaitTime> parseLatestWaitTimes(Uint8List body) {
+  final json = jsonDecode(utf8.decode(body)) as Map<String, dynamic>;
+  return [
+    for (final item in json['spots'] as List<dynamic>) LastWaitTime.fromJson(item as Map<String, dynamic>),
+  ];
 }

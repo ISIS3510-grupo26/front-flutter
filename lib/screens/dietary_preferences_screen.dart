@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../models/food_preferences.dart';
+import '../models/user_preferences.dart';
+import '../repositories/api_exception.dart';
+import '../services/connection_check.dart';
 import '../services/preferences_service.dart';
+import '../services/preferences_sync.dart';
 import '../services/profile_prefs.dart';
 import '../theme/app_colors.dart';
+import '../widgets/offline_banner.dart';
 
 class DietaryPreferencesScreen extends StatefulWidget {
   /// Where the choices are saved; tests pass a fake.
@@ -13,7 +18,11 @@ class DietaryPreferencesScreen extends StatefulWidget {
   /// the match % of each spot (smart feature). Null: only on the phone.
   final PreferencesService? preferences;
 
-  const DietaryPreferencesScreen({super.key, this.prefs, this.preferences});
+  final PreferencesSync? sync;
+
+  final OfflineCheck? isOffline;
+
+  const DietaryPreferencesScreen({super.key, this.prefs, this.preferences, this.sync, this.isOffline});
 
   @override
   State<DietaryPreferencesScreen> createState() =>
@@ -24,6 +33,9 @@ class _DietaryPreferencesScreenState
     extends State<DietaryPreferencesScreen> {
   late final ProfilePrefs _prefs = widget.prefs ?? ProfilePrefs();
   bool _saving = false;
+
+  /// No network when the screen opened.
+  bool _offline = false;
 
   String _diet = 'No specific diet';
 
@@ -72,6 +84,10 @@ class _DietaryPreferencesScreenState
   void initState() {
     super.initState();
     _load();
+    // Future with handler: the screen doesn't wait for this answer to show the choices.
+    (widget.isOffline ?? phoneIsOffline)().then((offline) {
+      if (mounted) setState(() => _offline = offline);
+    });
   }
 
   /// Shows what the student saved last time; the defaults above until then.
@@ -112,30 +128,41 @@ class _DietaryPreferencesScreenState
       );
       return;
     }
-    final service = widget.preferences;
+        final service = widget.preferences;
     if (service != null) {
-      final sent = await _sendToBackend(service);
+      final error = await _sendToBackend(service);
       if (!mounted) return;
-      _message(sent
-          ? 'Dietary preferences saved. Your matches were updated.'
-          : "Saved on this phone, but your matches couldn't be updated. Save again when you're online.");
+      if (error == null) {
+        _message('Dietary preferences saved. Your matches were updated.');
+      } else {
+        // The feed and the profile already use the new choices, and the
+        // backend gets them by itself when the connection comes back.
+        service.useCopyFromPhone(_applyTo(service.current ?? const UserPreferences()));
+        widget.sync?.markPending().catchError((Object e) => debugPrint("Couldn't mark the dietary preferences to sync: $e"));
+        _message(isNetworkError(error)
+            ? "You're offline. Saved on this phone, your matches will update by themselves when you're back online."
+            : "Saved on this phone, but your matches couldn't be updated. We'll try again later.");
+      }
     }
     if (mounted) Navigator.pop(context);
   }
 
-  /// The phone copy is already saved; this only fails without connection.
-  Future<bool> _sendToBackend(PreferencesService service) async {
-    try {
-      // Keeps the taste part that the other screen sent.
-      final current = service.current ?? await service.load();
-      await service.save(current.copyWith(
+  /// This screen's choices on top of [base], which keeps the other screen's part.
+  UserPreferences _applyTo(UserPreferences base) => base.copyWith(
         diet: _diet,
         avoid: _avoid.toList(),
         allergies: _allergies.toList(),
-      ));
-      return true;
-    } on Exception {
-      return false;
+      );
+
+  /// The phone copy is already saved. Returns null if the backend got it too,
+  /// or the error (no connection or a server problem).
+  Future<Object?> _sendToBackend(PreferencesService service) async {
+    try {
+      await service.save(_applyTo(service.current ?? await service.load()));
+      return null;
+    } catch (e) {
+      // Also a guest without an account (StateError), so the screen never crashes.
+      return e;
     }
   }
 
@@ -178,6 +205,10 @@ class _DietaryPreferencesScreenState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (_offline) ...[
+                      const OfflineBanner(message: 'Offline · your changes stay saved on this phone'),
+                      const SizedBox(height: 12),
+                    ],
                     const _DietaryIntro(),
                     const SizedBox(height: 24),
 
@@ -343,7 +374,7 @@ class _DietaryIntro extends StatelessWidget {
         color: AppColors.mintLight,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: AppColors.mint.withOpacity(0.35),
+          color: AppColors.mint.withValues(alpha: 0.35),
         ),
       ),
       child: Row(

@@ -570,7 +570,7 @@ class _ReviewsHeader extends StatelessWidget {
   final VoidCallback? onWrite;
   final String? hint;
 
-  /// Showing saved data: the write button stays visible but disabled.
+  /// Showing the copy saved on the phone (no connection). The student can still write or continue a review.
   final bool offline;
   
   /// The student left a review half written here (saved in Hive).
@@ -601,16 +601,14 @@ class _ReviewsHeader extends StatelessWidget {
                 ),
               ),
             ),
-            if (offline)
-              TextButton.icon(
-                onPressed: null,
-                icon: const Icon(Icons.cloud_off, size: 18),
-                label: const Text('Reviews need internet'),
-              )
-            else if (onWrite != null)
+                        if (onWrite != null)
               TextButton.icon(
                 onPressed: onWrite,
-                icon: const Icon(Icons.rate_review_outlined, size: 18, color: AppColors.tomato),
+                icon: Icon(
+                  offline ? Icons.cloud_off : Icons.rate_review_outlined,
+                  size: 18,
+                  color: AppColors.tomato,
+                ),
                 label: Text(
                   hasDraft ? 'Continue your review' : 'Rate it',
                   style: const TextStyle(color: AppColors.tomato, fontWeight: FontWeight.w700),
@@ -619,7 +617,12 @@ class _ReviewsHeader extends StatelessWidget {
           ],
         ),
         if (hint != null)
-          Text(hint!, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          Text(hint!, style: const TextStyle(fontSize: 12, color: AppColors.muted))
+        else if (offline && onWrite != null)
+          const Text(
+            "You're offline: your review stays saved on this phone and you can publish it when you're back online.",
+            style: TextStyle(fontSize: 12, color: AppColors.muted),
+          ),
       ],
     );
   }

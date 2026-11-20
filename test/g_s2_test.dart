@@ -20,8 +20,10 @@ import 'package:campus_bites/services/preferences_service.dart';
 import 'package:campus_bites/services/profile_prefs.dart';
 import 'package:campus_bites/services/shake_detector.dart';
 import 'package:campus_bites/services/shake_picker.dart';
+import 'package:campus_bites/services/wait_times_store.dart';
 import 'package:campus_bites/services/weather_context.dart';
 import 'package:campus_bites/services/weather_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -82,22 +84,55 @@ LastWaitTime _wait(String id, String name, {int? minutes, int? ago, bool recent 
 class _FakeWaitTimes extends Fake implements WaitTimesRepository {
   final sent = <WaitReport>[];
   int failuresLeft = 0;
+  bool offline = false;
 
   @override
-  Future<List<LastWaitTime>> fetchLatest() async => [
-        _wait('conda-de-bons', 'Conda de Bons'),
-        _wait('nitro-coffee', 'Nitro Coffee & Brew', minutes: 12, ago: 5, reports: 2),
-        _wait('green-bowl-co', 'Green Bowl Co.', minutes: sent.isEmpty ? 25 : sent.last.minutes, ago: 0),
-        _wait('el-vagon-street-food', 'El Vagón Street Food', minutes: 5, ago: 300, recent: false),
-      ];
+  Future<List<LastWaitTime>> fetchLatest() async {
+    if (offline) throw http.ClientException('no connection');
+    return [
+      _wait('conda-de-bons', 'Conda de Bons'),
+      _wait('nitro-coffee', 'Nitro Coffee & Brew', minutes: 12, ago: 5, reports: 2),
+      _wait('green-bowl-co', 'Green Bowl Co.', minutes: sent.isEmpty ? 25 : sent.last.minutes, ago: 0),
+      _wait('el-vagon-street-food', 'El Vagón Street Food', minutes: 5, ago: 300, recent: false),
+    ];
+  }
 
   @override
   Future<void> send(WaitReport report) async {
+    if (offline) throw http.ClientException('no connection');
     if (failuresLeft > 0) {
       failuresLeft--;
       throw const ApiException(503);
     }
     sent.add(report);
+  }
+}
+
+/// The wait times store without SQLite: the list and the pending reports in memory.
+class _MemoryWaitStore extends Fake implements WaitTimesStore {
+  SavedWaitTimes? saved;
+  final pending = <WaitReport>[];
+
+  @override
+  Future<SavedWaitTimes?> loadSaved() async => saved;
+
+  @override
+  Future<void> saveLatest(List<LastWaitTime> waits, DateTime savedAt) async =>
+      saved = SavedWaitTimes(waits: waits, savedAt: savedAt, pending: {});
+
+  @override
+  Future<void> addPending(WaitReport report) async => pending.add(report);
+
+  @override
+  Future<Map<String, int>> pendingBySpot() async => {for (final r in pending) r.spotId: r.minutes};
+
+  @override
+  Future<int> flush(WaitTimesRepository repository) async {
+    for (final r in [...pending]) {
+      await repository.send(r);
+      pending.remove(r);
+    }
+    return 0;
   }
 }
 
@@ -475,7 +510,7 @@ void main() {
 
     testWidgets('the screen shows the shortest wait and reporting updates it', (tester) async {
       final repo = _FakeWaitTimes();
-      await tester.pumpWidget(MaterialApp(home: WaitTimesScreen(repository: repo, onOpenSpot: (_) {})));
+      await tester.pumpWidget(MaterialApp(home: WaitTimesScreen(repository: repo, store: _MemoryWaitStore(), onOpenSpot: (_) {}, connectionChanges: const Stream.empty())));
       await tester.pumpAndSettle();
 
       expect(find.text('Shortest wait right now: 🍽️ Nitro Coffee & Brew, ~12 min.'), findsOneWidget);
@@ -494,7 +529,7 @@ void main() {
 
     testWidgets('if sending fails, Retry sends the same report', (tester) async {
       final repo = _FakeWaitTimes()..failuresLeft = 1;
-      await tester.pumpWidget(MaterialApp(home: WaitTimesScreen(repository: repo, onOpenSpot: (_) {})));
+      await tester.pumpWidget(MaterialApp(home: WaitTimesScreen(repository: repo, store: _MemoryWaitStore(), onOpenSpot: (_) {}, connectionChanges: const Stream.empty())));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('Report the wait here').first);
@@ -507,6 +542,50 @@ void main() {
       await tester.pumpAndSettle();
       expect(repo.sent, hasLength(1));
       expect(repo.sent.single.minutes, 0);
+    });
+
+    
+    testWidgets('offline: shows the saved list, keeps the report and sends it when the signal is back',
+        (tester) async {
+      final repo = _FakeWaitTimes();
+      final store = _MemoryWaitStore();
+      await store.saveLatest(await repo.fetchLatest(), DateTime(2026, 11, 18, 12, 5));
+      final connection = StreamController<List<ConnectivityResult>>();
+      repo.offline = true;
+
+      await tester.pumpWidget(MaterialApp(
+        home: WaitTimesScreen(
+            repository: repo, store: store, onOpenSpot: (_) {}, connectionChanges: connection.stream),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('Offline · wait times from 12:05'), findsOneWidget);
+      expect(find.text('Nitro Coffee & Brew'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Report the wait here').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('10 min'));
+      await tester.pumpAndSettle();
+      expect(store.pending, hasLength(1));
+      expect(find.text('Your report: 10 min · waiting to send'), findsOneWidget);
+
+      repo.offline = false;
+      connection.add([ConnectivityResult.wifi]);
+      await tester.pumpAndSettle();
+      expect(repo.sent.single.minutes, 10);
+      expect(store.pending, isEmpty);
+      expect(find.textContaining('Offline'), findsNothing);
+      await connection.close();
+    });
+
+    testWidgets('offline with nothing saved says so instead of an empty screen', (tester) async {
+      final repo = _FakeWaitTimes()..offline = true;
+      await tester.pumpWidget(MaterialApp(
+        home: WaitTimesScreen(
+            repository: repo, store: _MemoryWaitStore(), onOpenSpot: (_) {}, connectionChanges: const Stream.empty()),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.textContaining("You're offline and there are no saved wait times yet"), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
     });
   });
 
