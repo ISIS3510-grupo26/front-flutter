@@ -79,6 +79,37 @@ class TelemetryEvent {
         screen = 'review_submit',
         occurredAt = startedAt.toUtc();
 
+  /// BQ9: the student opened [spotId] from a compatibility recommendation
+  /// ("Best for you right now" or the For You feed sorted by match). The
+  /// [eventId] is also the id of the visit candidate saved on the phone.
+  TelemetryEvent.recommendationOpen({
+    required String this.spotId,
+    this.userId,
+    String? eventId,
+    DateTime? occurredAt,
+  })  : eventId = eventId ?? _newEventId(),
+        screen = 'recommendation_open',
+        durationMs = 0,
+        success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = (occurredAt ?? DateTime.now()).toUtc();
+
+  /// BQ9: the phone arrived at [spotId] after the student opened it from a
+  /// recommendation. [eventId] is derived from the candidate, so finding the
+  /// same visit twice (two checks at once, a resend) is never counted twice.
+  TelemetryEvent.recommendationVisit({
+    required String this.spotId,
+    this.userId,
+    required this.eventId,
+    DateTime? occurredAt,
+  })  : screen = 'recommendation_visit',
+        durationMs = 0,
+        success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = (occurredAt ?? DateTime.now()).toUtc();
+
   /// Reads back an event written with [toJson] (the BQ14 offline outbox).
   /// Keeps the same eventId, so a resend is never counted twice.
   TelemetryEvent.fromJson(Map<String, dynamic> json)
