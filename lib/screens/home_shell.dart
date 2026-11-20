@@ -11,6 +11,8 @@ import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/best_for_you_loader.dart';
 import '../services/best_for_you_service.dart';
+import '../services/compare_loader.dart';
+import '../services/comparison_history.dart';
 import '../services/favorites_controller.dart';
 import '../services/favorites_local_store.dart';
 import '../services/local_database.dart';
@@ -39,7 +41,9 @@ import '../services/shake_detector.dart';
 import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
+import '../widgets/compare_picker_sheet.dart';
 import 'change_password_screen.dart';
+import 'compare_screen.dart';
 import 'for_you_screen.dart';
 import 'place_detail_screen.dart';
 import 'saved_places_screen.dart';
@@ -124,6 +128,15 @@ class _HomeShellState extends State<HomeShell> {
     store: widget.store,
     currentUserId: () => widget.session.userId,
     onAttemptRecorded: _reviewEvents.flush,
+  );
+  // Compare (Sprint 4): pages in an LRU cache and in SQLite, waits from BQ4.
+  final _compareHistory = const SqliteComparisonHistory();
+  late final _compareLoader = CompareLoader(
+    fetchSpot: _spots.fetchSpot,
+    fetchWaits: _waitTimes.fetchLatest,
+    savedWaits: () async => (await _waitStore.loadSaved())?.waits,
+    saveWaits: (waits) => _waitStore.saveLatest(waits, DateTime.now()),
+    history: _compareHistory,
   );
   late final _matchCache = MatchScoresCache(repository: _matches, store: widget.store);
   late final StreamSubscription<List<ConnectivityResult>> _connectionChanges;
@@ -312,6 +325,7 @@ class _HomeShellState extends State<HomeShell> {
           favorites: _favorites,
           onToggleSaved: _toggleSaved,
           reviewSubmitter: _reviewSubmitter,
+          onCompare: _openCompare,
         ),
       ),
     );
@@ -335,6 +349,32 @@ class _HomeShellState extends State<HomeShell> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text('You made it to ${names.join(' and ')}. Enjoy your meal! 🍽️')));
+  }
+
+  /// Compare: picks the second place (or a recent comparison) and opens the
+  /// table on top of the restaurant page.
+  Future<void> _openCompare(String firstId) async {
+    final pair = await showComparePicker(
+      context,
+      firstId: firstId,
+      catalog: _favorites.spots,
+      history: _compareHistory,
+    );
+    if (pair == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CompareScreen(
+          firstId: pair.first,
+          secondId: pair.second,
+          loader: _compareLoader,
+          catalog: _favorites.spots,
+          matchScores: _matchScores?.scores,
+          onOpenSpot: _openSpot,
+          connectivity: Connectivity().onConnectivityChanged,
+        ),
+      ),
+    );
   }
 
   void _openWaitTimes() {
