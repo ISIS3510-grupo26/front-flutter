@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/spots_data.dart';
 import '../models/hourly_ranking.dart';
 import '../services/popularity_loader.dart';
 import '../services/popularity_ranking.dart';
@@ -61,6 +62,7 @@ class PopularNowSection extends StatelessWidget {
                 RankedSpotCard(
                   rank: index + 1,
                   emoji: pick.spot.emoji,
+                  imageUrl: catalogImageUrl(pick.spot.spotId),
                   name: pick.spot.name,
                   detail: '👀 ${pick.spot.pageViews} · 🔎 ${pick.spot.searches}',
                   // Only once a taste profile exists: then the reason matters.

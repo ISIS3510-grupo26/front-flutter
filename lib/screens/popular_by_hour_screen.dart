@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/spots_data.dart';
 import '../models/hourly_ranking.dart';
 import '../models/weekday_searches.dart';
 import '../services/popularity_loader.dart';
@@ -7,6 +8,7 @@ import '../theme/app_colors.dart';
 import '../widgets/count_pill.dart';
 import '../widgets/for_you_section.dart';
 import '../widgets/popular_now_section.dart';
+import '../widgets/spot_photo.dart';
 
 /// "By hour" from Popular right now, the same design as the Kotlin app:
 /// which restaurants get the most page views and searches at each hour. It
@@ -260,15 +262,10 @@ class _RankingRow extends StatelessWidget {
             children: [
               RankBadge(rank: spot.rank, size: 32),
               const SizedBox(width: 12),
-              Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(spot.emoji, style: const TextStyle(fontSize: 22)),
+              SpotPhoto.place(
+                imageUrl: catalogImageUrl(spot.spotId),
+                emoji: spot.emoji,
+                size: 44,
               ),
               const SizedBox(width: 12),
               Expanded(
