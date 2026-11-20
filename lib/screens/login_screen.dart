@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../repositories/api_exception.dart';
@@ -6,9 +9,16 @@ import '../services/password_rules.dart';
 import '../theme/app_colors.dart';
 
 class LoginScreen extends StatefulWidget {
+  static const offlineMessage = "You're offline. Connect to sign in.";
+  static const serverMessage = 'CampusBites is having trouble. Try again in a moment.';
+
   final AuthSession session;
 
-  const LoginScreen({super.key, required this.session});
+  /// `Connectivity().onConnectivityChanged`: when the connection comes back,
+  /// the offline error goes away on its own. Tests pass their own stream.
+  final Stream<List<ConnectivityResult>>? connectivity;
+
+  const LoginScreen({super.key, required this.session, this.connectivity});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -17,15 +27,39 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  StreamSubscription<List<ConnectivityResult>>? _connectivity;
   bool _creatingAccount = false;
   bool _submitting = false;
+
+  /// The only place this screen shows an error: inline, under the fields.
   String? _error;
+
+  /// True while [_error] is the offline one, so only that one is cleared
+  /// when the connection comes back.
+  bool _offline = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectivity = widget.connectivity?.listen(_onConnectivityChanged);
+    // A snackbar left by the screen before signing out would show over this
+    // one; errors here are inline only.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    });
+  }
 
   @override
   void dispose() {
+    _connectivity?.cancel();
     _email.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    final online = results.any((r) => r != ConnectivityResult.none);
+    if (online && _offline) _setError(null);
   }
 
   String? _validate(String email, String password) {
@@ -38,36 +72,46 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _submit() async {
+    // The button is disabled while submitting, but Enter on the keyboard or
+    // two taps in the same frame can still get here: only one request.
+    if (_submitting) return;
     final email = _email.text.trim();
     final password = _password.text;
-    final invalid = _validate(email, password);
-    if (invalid != null) return setState(() => _error = invalid);
+    if (_validate(email, password) case final invalid?) return _setError(invalid);
 
     setState(() {
       _submitting = true;
       _error = null;
+      _offline = false;
     });
     try {
       await (_creatingAccount
           ? widget.session.signUp(email, password)
           : widget.session.logIn(email, password));
+      // Signed in: main.dart replaces this screen, so _submitting stays true.
     } on ApiException catch (e) {
-      _fail(switch (e.statusCode) {
+      _setError(switch (e.statusCode) {
         409 => 'That email is already in use. Try signing in instead.',
         401 => 'Incorrect email or password.',
         422 => 'Enter a valid email and a password of 8 to 128 characters.',
-        _ => 'Something went wrong on our side. Try again.',
+        _ => LoginScreen.serverMessage,
       });
-    } on Exception {
-      _fail("Couldn't reach CampusBites. Check your connection and try again.");
+    } on Exception catch (e) {
+      if (isNetworkError(e)) {
+        _setError(LoginScreen.offlineMessage, offline: true);
+      } else {
+        // A response the app couldn't read: the server's side, not the phone's.
+        _setError(LoginScreen.serverMessage);
+      }
     }
   }
 
-  void _fail(String message) {
+  void _setError(String? message, {bool offline = false}) {
     if (!mounted) return;
     setState(() {
       _submitting = false;
       _error = message;
+      _offline = offline;
     });
   }
 
@@ -163,10 +207,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   TextButton(
                     onPressed: _submitting
                         ? null
-                        : () => setState(() {
-                              _creatingAccount = !_creatingAccount;
-                              _error = null;
-                            }),
+                        : () {
+                            setState(() => _creatingAccount = !_creatingAccount);
+                            _setError(null);
+                          },
                     child: Text(
                       _creatingAccount
                           ? 'Already have an account? Sign in'
