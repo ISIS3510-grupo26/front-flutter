@@ -10,6 +10,7 @@ class PreferencesService extends ChangeNotifier {
   final MatchesRepository _repository;
   final String? Function() _currentUserId;
   UserPreferences? _current;
+  bool _onlyOnPhone = false;
 
   PreferencesService({
     required this._repository,
@@ -18,11 +19,25 @@ class PreferencesService extends ChangeNotifier {
 
   UserPreferences? get current => _current;
 
+  
+  /// True while [current] is the copy saved on this phone because the backend couldn't be reached. 
+  /// The profile shows it with an offline banner.
+  bool get onlyOnPhone => _onlyOnPhone;
+
+  /// Offline: the screens keep working with what is saved on the phone, and the feed and the profile tags use it 
+  /// until the backend answers again.
+  void useCopyFromPhone(UserPreferences preferences) {
+    _current = UserPreferences.fromJson({...preferences.toJson(), 'saved': true});
+    _onlyOnPhone = true;
+    notifyListeners();
+  }
+
   Future<UserPreferences> load() async {
     final userId = _currentUserId();
     if (userId == null) return const UserPreferences();
     final loaded = await _repository.fetchPreferences(userId);
     _current = loaded;
+    _onlyOnPhone = false;
     notifyListeners();
     return loaded;
   }
@@ -32,6 +47,7 @@ class PreferencesService extends ChangeNotifier {
     final userId = _currentUserId();
     if (userId == null) throw StateError('No signed-in user');
     _current = await _repository.savePreferences(userId, preferences);
+    _onlyOnPhone = false;
     notifyListeners();
   }
 }

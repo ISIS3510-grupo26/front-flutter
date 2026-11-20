@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../models/user_preferences.dart';
 import '../services/preferences_service.dart';
+import '../services/preferences_sync.dart';
 import '../theme/app_colors.dart';
+import '../widgets/offline_banner.dart';
 import 'taste_profile_screen.dart';
 import 'dietary_preferences_screen.dart';
 
@@ -14,6 +16,9 @@ class ProfileScreen extends StatelessWidget {
   /// The student's saved preferences. Null keeps the screens local only.
   final PreferencesService? preferences;
 
+  /// Sends the preferences saved offline once the connection comes back.
+  final PreferencesSync? preferencesSync;
+
   /// Shown under the avatar (the part of the email before the @).
   final String displayName;
 
@@ -22,6 +27,7 @@ class ProfileScreen extends StatelessWidget {
     required this.onSignOut,
     this.onChangePassword,
     this.preferences,
+    this.preferencesSync,
     this.displayName = 'Student',
   });
 
@@ -51,6 +57,22 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
+  /// Without connection the tags come from the copy saved on this phone, and
+  /// this banner says so instead of showing an empty profile.
+  Widget _buildOfflineBanner() {
+    final service = preferences;
+    if (service == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: service,
+      builder: (context, _) => service.onlyOnPhone
+          ? const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: OfflineBanner(message: 'Offline · profile saved on this phone'),
+            )
+          : const SizedBox.shrink(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -67,6 +89,7 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   _ProfileIdentity(name: displayName),
                   const SizedBox(height: 22),
+                  _buildOfflineBanner(),
 
                   _SectionTitle(
                     title: 'Taste Profile',
@@ -75,7 +98,7 @@ class ProfileScreen extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => TasteProfileScreen(preferences: preferences),
+                          builder: (_) => TasteProfileScreen(preferences: preferences, sync: preferencesSync),
                         ),
                       );
                     },
@@ -95,6 +118,7 @@ class ProfileScreen extends StatelessWidget {
                     onSignOut: onSignOut,
                     onChangePassword: onChangePassword,
                     preferences: preferences,
+                    preferencesSync: preferencesSync,
                   ),
                 ],
               ),
@@ -465,7 +489,7 @@ class _AchievementsSection extends StatelessWidget {
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: badges.length,
-            separatorBuilder: (_, __) =>
+            separatorBuilder: (_, _) =>
                 const SizedBox(width: 14),
             itemBuilder: (context, index) =>
                 _BadgeItem(data: badges[index]),
@@ -553,8 +577,9 @@ class _SettingsCard extends StatelessWidget {
   final VoidCallback onSignOut;
   final VoidCallback? onChangePassword;
   final PreferencesService? preferences;
+  final PreferencesSync? preferencesSync;
 
-  const _SettingsCard({required this.onSignOut, this.onChangePassword, this.preferences});
+  const _SettingsCard({required this.onSignOut, this.onChangePassword, this.preferences, this.preferencesSync});
 
   @override
   Widget build(BuildContext context) {
@@ -581,7 +606,7 @@ class _SettingsCard extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (_) =>
-                      DietaryPreferencesScreen(preferences: preferences),
+                      DietaryPreferencesScreen(preferences: preferences, sync: preferencesSync),
                 ),
               );
             },

@@ -6,11 +6,13 @@ import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/auth_session.dart';
 import 'services/hive_store.dart';
+import 'services/restaurant_photos.dart';
 import 'theme/app_colors.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  configureImageMemoryCache(PaintingBinding.instance.imageCache);
   final store = await HiveStore.open();
   // (BQ13): runs once per launch, before anything can be sending a review, so every attempt still saved 
   //means the app closed mid-send.

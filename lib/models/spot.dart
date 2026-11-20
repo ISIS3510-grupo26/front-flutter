@@ -50,6 +50,10 @@ class Spot {
   final double latitude;
   final double longitude;
 
+  /// Photo of the place, relative to the backend ("fotos/nitro-coffee.jpg", the same image_url the backend 
+  /// catalog has).
+  final String? imageUrl;
+
   const Spot({
     required this.id,
     required this.emoji,
@@ -70,6 +74,7 @@ class Spot {
     required this.note,
     required this.latitude,
     required this.longitude,
+    this.imageUrl,
     this.isSaved = false,
   });
 
@@ -109,6 +114,7 @@ class Spot {
       note: note,
       latitude: latitude,
       longitude: longitude,
+      imageUrl: imageUrl,
       isSaved: isSaved ?? this.isSaved,
     );
   }

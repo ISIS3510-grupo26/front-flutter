@@ -2,13 +2,18 @@ import 'package:flutter/material.dart';
 
 import '../repositories/api_exception.dart';
 import '../services/auth_session.dart';
+import '../services/connection_check.dart';
 import '../services/password_rules.dart';
 import '../theme/app_colors.dart';
+import '../widgets/offline_banner.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
   final AuthSession session;
 
-  const ChangePasswordScreen({super.key, required this.session});
+  /// The app asks the phone.
+  final OfflineCheck? isOffline;
+
+  const ChangePasswordScreen({super.key, required this.session, this.isOffline});
 
   @override
   State<ChangePasswordScreen> createState() => _ChangePasswordScreenState();
@@ -20,6 +25,25 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   final _confirm = TextEditingController();
   bool _submitting = false;
   String? _error;
+
+
+  /// Without network the password can't be changed. So the screen says it and waits for the connection.
+  bool _offline = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkConnection();
+  }
+
+  Future<void> _checkConnection() async {
+    final offline = await (widget.isOffline ?? phoneIsOffline)();
+    if (!mounted) return;
+    setState(() {
+      _offline = offline;
+      if (!offline) _error = null;
+    });
+  }
 
   @override
   void dispose() {
@@ -60,8 +84,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         422 => 'Use a new password between 8 and 128 characters.',
         _ => 'Something went wrong on our side. Try again.',
       });
-    } on Exception {
-      _fail("Couldn't reach CampusBites. Check your connection and try again.");
+        } on Exception catch (e) {
+      if (!isNetworkError(e)) return _fail('Something went wrong on our side. Try again.');
+      // No answer: either the phone lost the signal or CampusBites took too long.
+      final offline = await (widget.isOffline ?? phoneIsOffline)();
+      if (!mounted) return;
+      setState(() => _offline = offline);
+      _fail(offline
+          ? "You're offline. Your password wasn't changed, try again when you're back online."
+          : "CampusBites is taking too long to answer. Your password wasn't changed, try again in a moment.");
     }
   }
 
@@ -93,6 +124,19 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (_offline) ...[
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: OfflineBanner(message: "Offline · you can't change your password now"),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'CampusBites has to check your current password, so this needs internet. '
+                    'For your security your password is never saved on the phone.',
+                    style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 const Text(
                   "You'll stay signed in here. Any other device using your account will be signed out.",
                   style: TextStyle(fontSize: 13, color: AppColors.muted),
@@ -129,7 +173,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 ],
                 const SizedBox(height: 20),
                 FilledButton(
-                  onPressed: _submitting ? null : _submit,
+                  onPressed: _submitting ? null : (_offline ? _checkConnection : _submit),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.tomato,
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -140,7 +184,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                           dimension: 20,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('Update password'),
+                      : Text(_offline ? 'Check connection again' : 'Update password'),
                 ),
               ],
             ),

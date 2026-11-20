@@ -1,15 +1,30 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../models/wait_time.dart';
+import '../repositories/api_exception.dart';
 import '../repositories/wait_times_repository.dart';
+import '../services/wait_times_store.dart';
 import '../theme/app_colors.dart';
+import '../widgets/offline_banner.dart';
 
 /// BQ4 (type 2): "What is the last reported waiting time for each restaurant?"
 class WaitTimesScreen extends StatefulWidget {
   final WaitTimesRepository repository;
+  final WaitTimesStore store;
   final ValueChanged<String> onOpenSpot;
 
-  const WaitTimesScreen({super.key, required this.repository, required this.onOpenSpot});
+  final Stream<List<ConnectivityResult>>? connectionChanges;
+
+  const WaitTimesScreen({
+    super.key,
+    required this.repository,
+    required this.store,
+    required this.onOpenSpot,
+    this.connectionChanges,
+  });
 
   @override
   State<WaitTimesScreen> createState() => _WaitTimesScreenState();
@@ -19,25 +34,95 @@ class _WaitTimesScreenState extends State<WaitTimesScreen> {
   static const _options = [0, 5, 10, 15, 20, 30, 45, 60];
 
   List<LastWaitTime>? _waits;
-  bool _failed = false;
+
+  /// spotId -> minutes the student reported offline, still waiting to be sent.
+  Map<String, int> _pending = {};
+
+  /// Set when the list on screen is the saved one because there is no connection: when it was saved.
+  DateTime? _offlineSince;
+
+  /// Nothing to show: no connection and nothing saved, or a server error.
+  String? _error;
+
+  late final StreamSubscription<List<ConnectivityResult>> _connectionChanges;
 
   @override
   void initState() {
     super.initState();
+    _connectionChanges =
+        (widget.connectionChanges ?? Connectivity().onConnectivityChanged).listen(_onConnectivity);
     _load();
   }
 
+  @override
+  void dispose() {
+    _connectionChanges.cancel();
+    super.dispose();
+  }
+
+  /// When the signal comes back: send what was reported offline, then reload.
+  Future<void> _onConnectivity(List<ConnectivityResult> results) async {
+    if (results.every((r) => r == ConnectivityResult.none)) return;
+    try {
+      await widget.store.flush(widget.repository);
+    } on Exception {
+      // They stay saved for the next try.
+    }
+    await _load();
+  }
+
   Future<void> _load() async {
+    // 1. What is saved goes on screen right away, so it is never empty while waiting.
+    final saved = await widget.store.loadSaved();
+    if (!mounted) return;
+    if (_waits == null && saved != null) {
+      setState(() {
+        _waits = sortForDecision(saved.waits);
+        _pending = saved.pending;
+      });
+    }
+    // 2. Then the backend.
     try {
       final waits = await widget.repository.fetchLatest();
-      if (mounted) {
-        setState(() {
-          _waits = sortForDecision(waits);
-          _failed = false;
-        });
+      // Future with handler: saving to disk doesn't make the screen wait, and
+      // if it fails the screen still shows the fresh list.
+      widget.store
+          .saveLatest(waits, DateTime.now())
+          .catchError((Object e) => debugPrint("Couldn't save the wait times offline: $e"));
+      final pending = await widget.store.pendingBySpot();
+      if (!mounted) return;
+      setState(() {
+        _waits = sortForDecision(waits);
+        _pending = pending;
+        _offlineSince = null;
+        _error = null;
+      });
+      // The backend answered but there are reports saved from before (for
+      // example the signal was weak, not off, so the phone never "came back"):
+      // they are sent now and the list is asked again with them included.
+      if (pending.isNotEmpty) {
+        widget.store
+            .flush(widget.repository)
+            .then((sent) {
+              if (sent > 0) _load();
+            })
+            .catchError((Object e) => debugPrint("Couldn't send the saved wait times: $e"));
       }
-    } on Exception {
-      if (mounted) setState(() => _failed = true);
+    } on Exception catch (e) {
+      if (!mounted) return;
+      if (!isNetworkError(e) && _waits != null) {
+        _message("Couldn't refresh the wait times, something went wrong on our side.", retry: _load);
+      }
+      setState(() {
+        if (!isNetworkError(e)) {
+          // A server error is a real problem: it is not hidden behind old data.
+          _error = 'Something went wrong on our side. Pull down or tap Try again.';
+        } else if (saved != null) {
+          _offlineSince = saved.savedAt;
+        } else {
+          _error = "You're offline and there are no saved wait times yet. They will load when you're back online.";
+        }
+      });
     }
   }
 
@@ -81,7 +166,8 @@ class _WaitTimesScreenState extends State<WaitTimesScreen> {
       ),
     );
     if (minutes == null) return;
-    // The report is created once, a retry sends the same id and time.
+    // The report is created once (id and time), so a retry or a later send
+    // from the saved queue is the same report for the backend.
     await _send(WaitReport(spotId: place.spotId, minutes: minutes));
   }
 
@@ -90,8 +176,16 @@ class _WaitTimesScreenState extends State<WaitTimesScreen> {
       await widget.repository.send(report);
       _message('Thanks! Other students can see it now.');
       _load();
-    } on Exception {
-      _message("Couldn't send your report.", retry: () => _send(report));
+    } on Exception catch (e) {
+      if (!isNetworkError(e)) {
+        _message("Couldn't send your report.", retry: () => _send(report));
+        return;
+      }
+      // Offline: it is saved on the phone and sent when the signal comes back.
+      await widget.store.addPending(report);
+      if (!mounted) return;
+      setState(() => _pending = {..._pending, report.spotId: report.minutes});
+      _message("You're offline. Your report is saved and will be sent when you're back online.");
     }
   }
 
@@ -122,33 +216,43 @@ class _WaitTimesScreenState extends State<WaitTimesScreen> {
   Widget _body() {
     final waits = _waits;
     if (waits == null) {
+      final error = _error;
       return Center(
-        child: _failed
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    "Couldn't reach CampusBites. Check your connection.",
-                    style: TextStyle(color: AppColors.muted),
-                  ),
-                  TextButton(onPressed: _load, child: const Text('Try again')),
-                ],
+        child: error != null
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(error, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted)),
+                    TextButton(onPressed: _load, child: const Text('Try again')),
+                  ],
+                ),
               )
             : const CircularProgressIndicator(color: AppColors.tomato),
       );
     }
     final best = waits.where((w) => w.hasReport && w.isRecent).firstOrNull;
+    final offlineSince = _offlineSince;
     return RefreshIndicator(
       color: AppColors.tomato,
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
         children: [
+          if (offlineSince != null) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OfflineBanner(message: 'Offline · wait times from ${hourMinute(offlineSince)}'),
+            ),
+            const SizedBox(height: 12),
+          ],
           _Summary(best: best),
           const SizedBox(height: 14),
           for (final place in waits) ...[
             _WaitRow(
               place: place,
+              pendingMinutes: _pending[place.spotId],
               onTap: () => widget.onOpenSpot(place.spotId),
               onReport: () => _report(place),
             ),
@@ -188,14 +292,18 @@ class _Summary extends StatelessWidget {
 
 class _WaitRow extends StatelessWidget {
   final LastWaitTime place;
+
+  /// Minutes the student reported here while offline, not sent yet.
+  final int? pendingMinutes;
   final VoidCallback onTap;
   final VoidCallback onReport;
 
-  const _WaitRow({required this.place, required this.onTap, required this.onReport});
+  const _WaitRow({required this.place, required this.onTap, required this.onReport, this.pendingMinutes});
 
   @override
   Widget build(BuildContext context) {
     final fresh = place.hasReport && place.isRecent;
+    final pending = pendingMinutes;
     return Material(
       color: AppColors.card,
       borderRadius: BorderRadius.circular(18),
@@ -222,6 +330,11 @@ class _WaitRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(place.detail, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                    if (pending != null)
+                      Text(
+                        'Your report: ${pending == 0 ? 'no line' : '$pending min'} · waiting to send',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.tomato),
+                      ),
                   ],
                 ),
               ),

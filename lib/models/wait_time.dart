@@ -33,6 +33,17 @@ class LastWaitTime {
         recentReports: json['recentReports'] as int,
       );
 
+  /// Reads back a row of the spot_waits table (wait_times_store.dart).
+  factory LastWaitTime.fromRow(Map<String, Object?> row) => LastWaitTime(
+        spotId: row['spot_id'] as String,
+        name: row['name'] as String,
+        emoji: row['emoji'] as String,
+        minutes: row['minutes'] as int?,
+        minutesAgo: row['minutes_ago'] as int?,
+        isRecent: row['is_recent'] == 1,
+        recentReports: row['recent_reports'] as int,
+      );
+
   bool get hasReport => minutes != null;
 
   /// "reported 8 min ago · 3 reports in the last 2 h"

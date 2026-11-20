@@ -5,6 +5,7 @@ import '../models/spot.dart';
 final List<Spot> sampleSpots = [
   const Spot(
     id: 'conda-de-bons',
+    imageUrl: 'fotos/conda-de-bons.jpg',
     emoji: '🍔',
     emojiBackground: Color(0xFFFFFBEB),
     emojiBorder: Color(0xFFFEF3C7),
@@ -27,6 +28,7 @@ final List<Spot> sampleSpots = [
   ),
   const Spot(
     id: 'green-bowl-co',
+    imageUrl: 'fotos/green-bowl-co.jpg',
     emoji: '🥗',
     emojiBackground: Color(0xFFECFDF5),
     emojiBorder: Color(0xFFD1FAE5),
@@ -49,6 +51,7 @@ final List<Spot> sampleSpots = [
   ),
   const Spot(
     id: 'nitro-coffee',
+    imageUrl: 'fotos/nitro-coffee.jpg',
     emoji: '☕',
     emojiBackground: Color(0xFFFFF7ED),
     emojiBorder: Color(0xFFFFEDD5),
@@ -71,6 +74,7 @@ final List<Spot> sampleSpots = [
   ),
   const Spot(
     id: 'taqueria-la-esquina',
+    imageUrl: 'fotos/taqueria-la-esquina.jpg',
     emoji: '🌮',
     emojiBackground: Color(0xFFFFFBEB),
     emojiBorder: Color(0xFFFEF3C7),
@@ -93,6 +97,7 @@ final List<Spot> sampleSpots = [
   ),
   const Spot(
     id: 'la-esquina-burger-lab',
+    imageUrl: 'fotos/la-esquina-burger-lab.jpg',
     emoji: '🍔',
     emojiBackground: Color(0xFFFFFBEB),
     emojiBorder: Color(0xFFFEF3C7),
@@ -115,6 +120,7 @@ final List<Spot> sampleSpots = [
   ),
   const Spot(
     id: 'poodle-pizza-slices',
+    imageUrl: 'fotos/poodle-pizza-slices.jpg',
     emoji: '🍕',
     emojiBackground: Color(0xFFFFF7ED),
     emojiBorder: Color(0xFFFFEDD5),
@@ -136,6 +142,7 @@ final List<Spot> sampleSpots = [
   ),
   const Spot(
     id: 'el-vagon-street-food',
+    imageUrl: 'fotos/el-vagon-street-food.jpg',
     emoji: '🌭',
     emojiBackground: Color(0xFFFEF2F2),
     emojiBorder: Color(0xFFFEE2E2),
