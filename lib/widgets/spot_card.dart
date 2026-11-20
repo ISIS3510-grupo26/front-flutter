@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/spot.dart';
 import '../theme/app_colors.dart';
+import 'spot_photo.dart';
 
 /// The single card representation used everywhere a [Spot] is shown, in
 /// both the For You feed and Saved Places. Tapping the heart toggles
@@ -97,17 +98,7 @@ class SpotCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 64,
-                height: 64,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: spot.emojiBackground,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: spot.emojiBorder),
-                ),
-                child: Text(spot.emoji, style: const TextStyle(fontSize: 28)),
-              ),
+              SpotPhoto(spot: spot),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
