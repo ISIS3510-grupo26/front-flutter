@@ -104,4 +104,49 @@ void main() {
     expect(copy.emojiBackground.toARGB32(), 0xFFFFFBEB);
     expect(copy.reviews.single.text, 'Buen cafe');
   });
+
+  group('prefetch for offline use', () {
+    SpotDetail spotWithId(String id) => SpotDetail.fromJson({..._spot.toJson(), 'id': id});
+
+    test('saves every page so the pins open offline', () async {
+      final saved = await prefetchPlaceDetails(
+        spotIds: ['a', 'b', 'c'],
+        fetch: (id) async => spotWithId(id),
+        storage: storage,
+      );
+
+      expect(saved, 3);
+      expect(storage.saved.keys, ['a', 'b', 'c']);
+    });
+
+    test('stops at the first network error', () async {
+      final asked = <String>[];
+      final saved = await prefetchPlaceDetails(
+        spotIds: ['a', 'b', 'c'],
+        fetch: (id) async {
+          asked.add(id);
+          if (id == 'b') throw const SocketException('offline');
+          return spotWithId(id);
+        },
+        storage: storage,
+      );
+
+      expect(saved, 1);
+      expect(asked, ['a', 'b']);
+    });
+
+    test('skips a page the server fails and keeps going', () async {
+      final saved = await prefetchPlaceDetails(
+        spotIds: ['a', 'b', 'c'],
+        fetch: (id) async {
+          if (id == 'b') throw const ApiException(500);
+          return spotWithId(id);
+        },
+        storage: storage,
+      );
+
+      expect(saved, 2);
+      expect(storage.saved.keys, ['a', 'c']);
+    });
+  });
 }

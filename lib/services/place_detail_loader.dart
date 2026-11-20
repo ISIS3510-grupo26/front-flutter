@@ -48,3 +48,29 @@ Future<({SpotDetail spot, DateTime savedAt})?> _readSaved(
     return null;
   }
 }
+
+/// Eventual connectivity: prefetch. While the Taste Map is online, the pages
+/// of its picks are saved in SQLite in the background, so tapping a pin later
+/// without internet opens the page instead of "Couldn't load this place".
+///
+/// One request at a time, so the backend is not flooded. Stops at the first
+/// network error: the phone just went offline and the rest would fail too.
+/// A page that fails for another reason is skipped. Returns how many pages
+/// were saved.
+Future<int> prefetchPlaceDetails({
+  required List<String> spotIds,
+  required Future<SpotDetail> Function(String spotId) fetch,
+  required SpotDetailStorage storage,
+}) async {
+  var saved = 0;
+  for (final id in spotIds) {
+    try {
+      await storage.save(await fetch(id));
+      saved++;
+    } catch (e) {
+      if (isNetworkError(e)) break;
+      debugPrint("Couldn't prefetch $id: $e");
+    }
+  }
+  return saved;
+}

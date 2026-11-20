@@ -14,6 +14,7 @@ import '../repositories/spots_repository.dart';
 import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
 import '../services/place_detail_loader.dart';
+import '../services/reconnect_retry.dart';
 import '../services/review_submitter.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
@@ -63,6 +64,15 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
 
   /// Set while the page shows the copy saved on the phone.
   DateTime? _offlineSavedAt;
+
+  /// The last load failed because there is no network (not a server error).
+  bool _failedOffline = false;
+
+  /// A load is running: a second one (reconnect + Try again) is ignored.
+  bool _loading = false;
+
+  /// True while the reloads after a reconnection are running.
+  bool _reconnecting = false;
   late final StreamSubscription<List<ConnectivityResult>> _connectivity;
 
   @override
@@ -78,34 +88,53 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
     super.dispose();
   }
 
+  bool get _needsFreshData => _offlineSavedAt != null || _failed;
+
   /// Stream: when the connection comes back while the page shows saved data
-  /// (or an error), it reloads by itself. Not reported as a new visit.
+  /// (or an error), it reloads by itself. Right after reconnecting the network
+  /// is often not usable yet, so it retries a few times (1 s, 3 s, 6 s)
+  /// without a spinner. Not reported as a new visit.
   void _onConnectivityChanged(List<ConnectivityResult> results) {
     final online = results.any((r) => r != ConnectivityResult.none);
-    if (online && (_offlineSavedAt != null || _failed)) _load(reportVisit: false);
+    if (!online || !_needsFreshData || _reconnecting) return;
+    _reconnecting = true;
+    retryAfterReconnect(() async {
+      if (!mounted || !_needsFreshData) return true;
+      await _load(reportVisit: false, silent: true);
+      return !mounted || !_needsFreshData;
+    }).whenComplete(() => _reconnecting = false);
   }
 
-  Future<void> _load({required bool reportVisit}) async {
-    if (_failed) setState(() => _failed = false);
-    final watch = Stopwatch()..start();
-    final result = await loadPlaceDetail(
-      spotId: widget.spotId,
-      fetch: widget.repository.fetchSpot,
-      storage: widget.storage,
-    );
-    if (reportVisit) {
+  /// [silent]: the error message stays on screen while it tries again.
+  Future<void> _load({required bool reportVisit, bool silent = false}) async {
+    if (_loading) return;
+    _loading = true;
+    try {
+      if (_failed && !silent) setState(() => _failed = false);
+      final watch = Stopwatch()..start();
+      final result = await loadPlaceDetail(
+        spotId: widget.spotId,
+        fetch: widget.repository.fetchSpot,
+        storage: widget.storage,
+      );
       final error = result.error;
-      _report(watch.elapsedMilliseconds, httpStatus: error == null ? 200 : null, error: error);
-    }
-    if (!mounted) return;
-    setState(() {
-      if (result.spot case final spot?) {
-        _spot = spot;
-        _offlineSavedAt = result.offlineSavedAt;
-      } else {
-        _failed = true;
+      if (reportVisit) {
+        _report(watch.elapsedMilliseconds, httpStatus: error == null ? 200 : null, error: error);
       }
-    });
+      if (!mounted) return;
+      setState(() {
+        if (result.spot case final spot?) {
+          _spot = spot;
+          _offlineSavedAt = result.offlineSavedAt;
+          _failed = false;
+        } else {
+          _failed = true;
+          _failedOffline = error != null && isNetworkError(error);
+        }
+      });
+    } finally {
+      _loading = false;
+    }
   }
 
   void _report(int durationMs, {int? httpStatus, Object? error}) {
@@ -206,9 +235,15 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
               ? Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      "Couldn't load this place.",
-                      style: TextStyle(fontSize: 15, color: AppColors.espresso),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        _failedOffline
+                            ? "You're offline and this place isn't saved on your phone yet. It will load by itself when you're back online."
+                            : "Couldn't load this place.",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 15, color: AppColors.espresso),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     TextButton(
