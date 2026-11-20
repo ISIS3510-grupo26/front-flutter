@@ -163,3 +163,9 @@ final List<Spot> sampleSpots = [
     note: 'Best budget combo match for students with fast break between lectures.',
   ),
 ];
+
+final _imageBySpot = {for (final spot in sampleSpots) spot.id: spot.imageUrl};
+
+/// The photo of a spot from the catalog. The ranking endpoints (Best for you,
+/// Popular right now) only send the id, emoji and name, not image_url.
+String? catalogImageUrl(String spotId) => _imageBySpot[spotId];

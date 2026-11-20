@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import 'offline_banner.dart';
+import 'spot_photo.dart';
 
 /// The pieces every ranked section of For You is made of ("Best for you
 /// right now", "Popular right now"), so both look and behave the same.
@@ -122,12 +123,15 @@ class RankedSpotRow extends StatelessWidget {
   }
 }
 
-/// One place in a ranked section: its position, emoji and name, the line
+/// One place in a ranked section: its position, photo and name, the line
 /// that explains its position ([detail]), an optional smaller [note] and an
 /// optional [tag] at the bottom.
 class RankedSpotCard extends StatelessWidget {
   final int rank;
   final String emoji;
+
+  /// Relative to the backend, like Spot.imageUrl. Null shows the emoji.
+  final String? imageUrl;
   final String name;
   final String detail;
   final String? note;
@@ -138,6 +142,7 @@ class RankedSpotCard extends StatelessWidget {
     super.key,
     required this.rank,
     required this.emoji,
+    this.imageUrl,
     required this.name,
     required this.detail,
     this.note,
@@ -169,7 +174,7 @@ class RankedSpotCard extends StatelessWidget {
                   children: [
                     RankBadge(rank: rank),
                     const Spacer(),
-                    Text(emoji, style: const TextStyle(fontSize: 22)),
+                    SpotPhoto.place(imageUrl: imageUrl, emoji: emoji, size: 44),
                   ],
                 ),
                 const SizedBox(height: 8),
