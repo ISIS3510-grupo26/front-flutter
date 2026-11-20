@@ -12,6 +12,7 @@ import '../services/auth_session.dart';
 import '../services/best_for_you_loader.dart';
 import '../services/best_for_you_service.dart';
 import '../services/favorites_controller.dart';
+import '../services/favorites_local_store.dart';
 import '../services/local_database.dart';
 import '../services/place_detail_loader.dart';
 import '../services/nearby_favorites_loader.dart';
@@ -32,6 +33,7 @@ import '../repositories/matches_repository.dart';
 import '../repositories/wait_times_repository.dart';
 import '../services/preferences_service.dart';
 import '../services/preferences_sync.dart';
+import '../services/reconnect_retry.dart';
 import '../services/shake_detector.dart';
 import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
@@ -54,7 +56,10 @@ class HomeShell extends StatefulWidget {
   /// Hive boxes opened in main(): review drafts, BQ13 events and match scores.
   final HiveStore store;
 
-  const HomeShell({super.key, required this.session, required this.store});
+  /// Hive boxes with the saved places and the saves made offline.
+  final FavoritesLocalStore favoritesStore;
+
+  const HomeShell({super.key, required this.session, required this.store, required this.favoritesStore});
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -75,6 +80,7 @@ class _HomeShellState extends State<HomeShell> {
     repository: _api,
     telemetry: _telemetry,
     currentUserId: () => widget.session.userId,
+    local: widget.favoritesStore,
   );
   late final _nearbyLoader = NearbyFavoritesLoader(
     favorites: _api,
@@ -155,6 +161,14 @@ class _HomeShellState extends State<HomeShell> {
     _sendSavedWaitReports();
     _syncPreferences();
     if (_matchScores?.offline ?? false) _loadMatches(force: false);
+    if (_favorites.isOffline || _favorites.pendingIds.isNotEmpty) {
+      // The network may need a second or two after the radio connects.
+      retryAfterReconnect(() async {
+        if (!mounted) return true;
+        await _syncFavorites();
+        return !_favorites.isOffline && _favorites.pendingIds.isEmpty;
+      });
+    }
   }
 
   /// Wait times reported offline: they are sent even if the student never
@@ -250,11 +264,15 @@ class _HomeShellState extends State<HomeShell> {
     super.dispose();
   }
 
+  /// On open, on Retry and when the connection comes back: first the saves
+  /// made offline, then the server's list (which already includes them).
+  /// Without network nothing is shown here: Saved says it is offline.
   Future<void> _syncFavorites() async {
     try {
+      await _favorites.sendPending();
       await _favorites.syncFromServer();
     } on Exception {
-      _showError("Couldn't load your saved places.");
+      _showError("The server couldn't load your saved places.");
     }
   }
 
@@ -361,6 +379,8 @@ class _HomeShellState extends State<HomeShell> {
               onOpenSpot: _openSpot,
               sync: _favorites.sync,
               onRetrySync: _syncFavorites,
+              offlineSince: _favorites.copySavedAt,
+              pendingIds: _favorites.pendingIds,
             ),
             ProfileScreen(
               onSignOut: widget.session.signOut,
