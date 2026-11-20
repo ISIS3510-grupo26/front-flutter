@@ -31,7 +31,8 @@ class FavoritesController extends ChangeNotifier {
   final _inFlight = <String>{};
   List<Spot> _spots;
   FavoritesSync _sync = FavoritesSync.loading;
-  bool _sendingPending = false;
+  Future<void>? _syncing;
+  Future<int>? _sendingPending;
 
   FavoritesController({
     required this._repository,
@@ -123,53 +124,74 @@ class FavoritesController extends ChangeNotifier {
     }
   }
 
-  /// Eventual connectivity: sends the changes made offline, one by one with
-  /// async/await, and forgets each one only after the server got it.
-  /// Stops at the first network error (still offline: the rest wait).
-  /// Returns how many were sent.
-  Future<int> sendPending() async {
+  /// What the app runs on open, on Retry and when the connection comes back:
+  /// first the changes made offline, then the server's list (which already
+  /// has them). Only one runs at a time: a call while another is running gets
+  /// that same run instead of starting a second one.
+  Future<void> syncAll() => _syncing ??= _syncAll().whenComplete(() => _syncing = null);
+
+  Future<void> _syncAll() async {
+    await sendPending();
+    await syncFromServer();
+  }
+
+  /// Eventual connectivity: sends the changes made offline, in series with
+  /// async/await, and forgets each one only after the server got it. Stops at
+  /// the first network error (still offline: the rest wait). Like [syncAll],
+  /// a second call while it runs shares the same run, so no change is sent
+  /// twice. Returns how many were sent.
+  Future<int> sendPending() => _sendingPending ??= _sendPending().whenComplete(() => _sendingPending = null);
+
+  Future<int> _sendPending() async {
     final userId = _currentUserId();
     final local = _local;
-    if (userId == null || local == null || _sendingPending) return 0;
-    _sendingPending = true;
+    if (userId == null || local == null) return 0;
     var sent = 0;
     try {
       for (final change in local.pending) {
-        if (_inFlight.contains(change.spotId)) continue;
+        if (!_inFlight.add(change.spotId)) continue; // a tap on that heart is being sent right now
         try {
-          await _send(userId, change.spotId, change.desired);
+          await _send(userId, change.spotId, change.desired, offline: change);
           await local.markSent(change);
           sent++;
         } on Exception catch (e) {
           if (isNetworkError(e)) break;
-          // 5xx: the server may recover, so the change waits for next time.
-          // Another 4xx won't get better by retrying (e.g. the spot no longer
-          // exists): it is dropped and the next sync shows the server's state.
-          if (e is ApiException && e.statusCode < 500) await local.markSent(change);
+          if (e is ApiException && change.desired && e.statusCode == 404) {
+            // The spot doesn't exist anymore: it can never be saved, so the
+            // change is dropped and the heart goes off.
+            await local.markSent(change);
+            await local.removeSaved(change.spotId);
+            _setSaved(change.spotId, false);
+          } else if (e is ApiException && e.statusCode < 500) {
+            // Another 4xx won't get better by retrying: it is dropped and the
+            // next sync shows the server's state. A 5xx waits for next time.
+            await local.markSent(change);
+          }
+        } finally {
+          _inFlight.remove(change.spotId);
         }
       }
     } finally {
-      _sendingPending = false;
       notifyListeners();
     }
     return sent;
   }
 
-  /// PUT or DELETE. Saving twice (409) or unsaving a spot that isn't saved
-  /// (404) already leaves the server as the student wants, so they count as
-  /// success: a change sent again never fails because the first one arrived.
-  Future<void> _send(String userId, String spotId, bool save) async {
-    try {
-      if (save) {
-        await _repository.addFavorite(userId, spotId);
-      } else {
-        await _repository.removeFavorite(userId, spotId);
-      }
-    } on ApiException catch (e) {
-      if (!(save ? e.statusCode == 409 : e.statusCode == 404)) rethrow;
-    }
+  /// PUT or DELETE; any 2xx is success (the backend answers 204 to a repeated
+  /// save and to unsaving a spot that wasn't saved). favorite_added goes out
+  /// only after the server has the save; for a save made [offline] it keeps
+  /// the id and time of the tap, so a second send is not a second save.
+  Future<void> _send(String userId, String spotId, bool save, {PendingFavorite? offline}) async {
     if (save) {
-      _telemetry.enqueue(TelemetryEvent.favoriteAdded(userId: userId, spotId: spotId));
+      await _repository.addFavorite(userId, spotId);
+      _telemetry.enqueue(TelemetryEvent.favoriteAdded(
+        userId: userId,
+        spotId: spotId,
+        eventId: offline?.eventId,
+        occurredAt: offline?.updatedAt,
+      ));
+    } else {
+      await _repository.removeFavorite(userId, spotId);
     }
   }
 

@@ -264,13 +264,12 @@ class _HomeShellState extends State<HomeShell> {
     super.dispose();
   }
 
-  /// On open, on Retry and when the connection comes back: first the saves
-  /// made offline, then the server's list (which already includes them).
+  /// On open, on Retry and when the connection comes back. If they overlap
+  /// they share one run (see [FavoritesController.syncAll]).
   /// Without network nothing is shown here: Saved says it is offline.
   Future<void> _syncFavorites() async {
     try {
-      await _favorites.sendPending();
-      await _favorites.syncFromServer();
+      await _favorites.syncAll();
     } on Exception {
       _showError("The server couldn't load your saved places.");
     }

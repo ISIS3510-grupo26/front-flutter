@@ -15,16 +15,20 @@ class TelemetryEvent {
 
   /// BQ7: [userId] saved [spotId]. The backend rejects the whole batch if a
   /// favorite_added event lacks either, so both are required here.
+  /// A save made offline passes the [eventId] and time saved with it, so
+  /// sending it again after a crash is never counted as a second save.
   TelemetryEvent.favoriteAdded({
     required String this.userId,
     required String this.spotId,
-  })  : eventId = _newEventId(),
+    String? eventId,
+    DateTime? occurredAt,
+  })  : eventId = eventId ?? _newEventId(),
         screen = 'favorite_added',
         durationMs = 0,
         success = true,
         httpStatus = null,
         errorType = null,
-        occurredAt = DateTime.now().toUtc();
+        occurredAt = (occurredAt ?? DateTime.now()).toUtc();
 
   /// BQ3: the student opened [spotId] from For You search results. The
   /// backend counts these as the restaurant's searches for that hour.

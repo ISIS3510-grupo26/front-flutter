@@ -1,6 +1,7 @@
 import 'package:hive/hive.dart';
 
 import '../models/spot.dart';
+import '../models/telemetry_event.dart';
 
 /// A save or unsave the server hasn't received yet.
 class PendingFavorite {
@@ -10,7 +11,12 @@ class PendingFavorite {
   final bool desired;
   final DateTime updatedAt;
 
-  const PendingFavorite({required this.spotId, required this.desired, required this.updatedAt});
+  /// Id of the favorite_added event of a save, fixed when the student tapped:
+  /// if the change is sent twice (the app closed before forgetting it), BQ7
+  /// still counts one save. Null for an unsave.
+  final String? eventId;
+
+  const PendingFavorite({required this.spotId, required this.desired, required this.updatedAt, this.eventId});
 }
 
 /// Local storage strategy for favorites: Hive (key-value), the same database
@@ -69,6 +75,8 @@ class FavoritesLocalStore {
       ? _favorites.put(spot.id, _cardOf(spot, now ?? DateTime.now()))
       : _favorites.delete(spot.id);
 
+  Future<void> removeSaved(String spotId) => _favorites.delete(spotId);
+
   /// The server answered: its list replaces the whole copy.
   Future<void> replaceAll(Iterable<Spot> saved, {DateTime? now}) async {
     final at = now ?? DateTime.now();
@@ -87,15 +95,18 @@ class FavoritesLocalStore {
             spotId: key as String,
             desired: _pending.get(key)!['desired'] as bool,
             updatedAt: DateTime.parse(_pending.get(key)!['updatedAt'] as String),
+            eventId: _pending.get(key)!['eventId'] as String?,
           ),
       ];
 
   Set<String> get pendingIds => {for (final key in _pending.keys) key as String};
 
   /// Collapses by spot: a second change of the same spot overwrites the first.
+  /// A save gets the id of its favorite_added event now, at the tap.
   Future<void> queue(String spotId, {required bool desired, DateTime? now}) => _pending.put(spotId, {
         'desired': desired,
         'updatedAt': (now ?? DateTime.now()).toUtc().toIso8601String(),
+        if (desired) 'eventId': TelemetryEvent.newId(),
       });
 
   /// Forgets [change] after the server got it, unless the student changed

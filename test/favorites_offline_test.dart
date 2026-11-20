@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:campus_bites/data/spots_data.dart';
@@ -28,9 +29,15 @@ class _FakeRepository extends Fake implements FavoritesRepository {
   /// Thrown by PUT and DELETE; [fetchError] by the list.
   Object? error;
   Object? fetchError;
+  var fetches = 0;
+
+  /// While not completed, every request waits (to make calls overlap).
+  Completer<void>? gate;
 
   @override
   Future<Set<String>> fetchFavoriteIds(String userId) async {
+    fetches++;
+    await gate?.future;
     if (fetchError case final e?) throw e;
     return serverIds;
   }
@@ -43,6 +50,7 @@ class _FakeRepository extends Fake implements FavoritesRepository {
 
   Future<void> _call(String call) async {
     calls.add(call);
+    await gate?.future;
     if (error case final e?) throw e;
   }
 }
@@ -159,18 +167,81 @@ void main() {
         unorderedEquals(['nitro-coffee', 'green-bowl-co']));
   });
 
-  test('409 on save and 404 on unsave count as sent', () async {
+  test('a 404 on a pending save drops it and turns the heart off', () async {
+    final nitro = sampleSpots.firstWhere((s) => s.id == 'nitro-coffee');
+    await store.setSaved(nitro, true);
+    await store.queue('nitro-coffee', desired: true);
+    final c = controller();
+    expect(isSaved(c, 'nitro-coffee'), isTrue);
+
+    repo.error = const ApiException(404); // the spot no longer exists
+    expect(await c.sendPending(), 0);
+
+    expect(store.pending, isEmpty);
+    expect(store.savedIds, isEmpty);
+    expect(isSaved(c, 'nitro-coffee'), isFalse);
+    expect(telemetry.events, isEmpty);
+  });
+
+  test('syncs that overlap (open, reconnect, Retry) send each pending change once', () async {
+    await store.queue('nitro-coffee', desired: true);
+    await store.queue('green-bowl-co', desired: false);
+    repo.gate = Completer();
     final c = controller();
 
-    await store.queue('nitro-coffee', desired: true);
-    repo.error = const ApiException(409);
-    expect(await c.sendPending(), 1);
-    expect(telemetry.events, hasLength(1)); // it is saved on the server either way
+    final runs = [c.syncAll(), c.syncAll(), c.sendPending()];
+    repo.gate!.complete();
+    await Future.wait(runs);
 
-    await store.queue('green-bowl-co', desired: false);
-    repo.error = const ApiException(404);
-    expect(await c.sendPending(), 1);
+    expect(repo.calls, unorderedEquals(['PUT nitro-coffee', 'DELETE green-bowl-co']));
+    expect(repo.fetches, 1);
     expect(store.pending, isEmpty);
+    expect(telemetry.events, hasLength(1));
+  });
+
+  test('a save sent twice (the app closed before forgetting it) reuses its eventId', () async {
+    final tappedAt = DateTime.utc(2026, 11, 20, 9, 30);
+    await store.queue('nitro-coffee', desired: true, now: tappedAt);
+    final queued = store.pending.single;
+    final saved = Map<dynamic, dynamic>.from(Hive.box<Map>(FavoritesLocalStore.pendingBox).get('nitro-coffee')!);
+    final c = controller();
+
+    await c.sendPending();
+    // The PUT arrived but the app died before deleting the pending change.
+    await Hive.box<Map>(FavoritesLocalStore.pendingBox).put('nitro-coffee', saved);
+    await c.sendPending();
+
+    expect(repo.calls, ['PUT nitro-coffee', 'PUT nitro-coffee']); // the backend answers 204 both times
+    expect(telemetry.events.map((e) => e.eventId), [queued.eventId, queued.eventId]);
+    expect(telemetry.events.first.occurredAt, tappedAt); // when the student tapped, not when it synced
+  });
+
+  testWidgets('cold start without network: Saved shows the 2 favorites from Hive', (tester) async {
+    await tester.runAsync(() => store.replaceAll([
+          sampleSpots.firstWhere((s) => s.id == 'green-bowl-co'),
+          sampleSpots.firstWhere((s) => s.id == 'nitro-coffee'),
+        ]));
+    repo.fetchError = _offline;
+    final c = controller(); // a new app process: only the bundled catalog and Hive
+    await tester.runAsync(c.syncAll);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SavedPlacesScreen(
+          spots: c.spots,
+          onToggleSaved: (_) {},
+          nearbyLoader: _NoNearby(),
+          onRetrySync: () {},
+          sync: c.sync,
+          offlineSince: c.copySavedAt,
+        ),
+      ),
+    ));
+
+    expect(c.sync, FavoritesSync.offline);
+    expect(find.text('Green Bowl Co.'), findsOneWidget);
+    expect(find.text('Nitro Coffee & Brew'), findsOneWidget);
+    expect(find.textContaining('Offline · saved places from'), findsOneWidget);
   });
 
   test('a 5xx while sending keeps the change for next time', () async {
