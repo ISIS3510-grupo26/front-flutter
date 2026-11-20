@@ -29,13 +29,21 @@ class FavoritesRepository {
   Future<void> addFavorite(String userId, String spotId) async {
     final response =
         await _client.put(_spotUri(userId, spotId)).timeout(apiTimeout);
-    expectStatus(response, 204);
+    _expectSuccess(response);
   }
 
   Future<void> removeFavorite(String userId, String spotId) async {
     final response =
         await _client.delete(_spotUri(userId, spotId)).timeout(apiTimeout);
-    expectStatus(response, 204);
+    _expectSuccess(response);
+  }
+
+  /// Any 2xx. The backend answers 204 to a repeated save and to unsaving a
+  /// spot that wasn't saved, so sending a change twice never fails.
+  static void _expectSuccess(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode > 299) {
+      throw ApiException(response.statusCode);
+    }
   }
 
   /// The user's saved spots that are open now and within [maxWalkMinutes]
