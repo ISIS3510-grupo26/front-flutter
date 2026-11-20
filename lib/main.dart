@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -60,7 +61,10 @@ class CampusBitesApp extends StatelessWidget {
                 child: CircularProgressIndicator(color: AppColors.tomato),
               ),
             ),
-          AuthSignedOut() => LoginScreen(session: session),
+          AuthSignedOut() => LoginScreen(
+              session: session,
+              connectivity: Connectivity().onConnectivityChanged,
+            ),
           // Keyed by user so switching accounts starts from a fresh state.
           AuthSignedIn() || AuthDevUser() =>
             HomeShell(
