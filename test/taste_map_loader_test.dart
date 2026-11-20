@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:campus_bites/models/nearby_pick.dart';
@@ -32,6 +33,20 @@ class _FakeLocation implements LocationService {
       speedAccuracy: 0,
     );
   }
+
+  @override
+  Future<bool> openSettings() async => true;
+}
+
+/// GPS that never answers (offline, indoors) or whose plugin throws.
+class _BrokenLocation implements LocationService {
+  final bool hangs;
+
+  const _BrokenLocation({required this.hangs});
+
+  @override
+  Future<Position> getCurrentPosition() =>
+      hangs ? Completer<Position>().future : Future.error(StateError('plugin error'));
 
   @override
   Future<bool> openSettings() async => true;
@@ -133,6 +148,62 @@ void main() {
     expect(recommendations.lastLat, TasteMapLoader.campusLat);
     expect(recommendations.lastLng, TasteMapLoader.campusLng);
     expect(loaded.picks, hasLength(1));
+  });
+
+  test('a GPS that never answers falls back to the campus center instead of loading forever', () async {
+    final recommendations = _FakeRecommendations();
+    final loader = TasteMapLoader(
+      location: const _BrokenLocation(hangs: true),
+      recommendations: recommendations,
+      currentUserId: () => 'u1',
+      storage: _MemoryPicks(),
+      prefs: _MemoryPrefs(),
+      locationTimeout: const Duration(milliseconds: 10),
+    );
+
+    final loaded = await loader.load() as TasteMapLoaded;
+    expect(loaded.usedFallback, isTrue);
+    expect(recommendations.lastLat, TasteMapLoader.campusLat);
+  });
+
+  test('any other location error also falls back to the campus center', () async {
+    final loader = TasteMapLoader(
+      location: const _BrokenLocation(hangs: false),
+      recommendations: _FakeRecommendations(),
+      currentUserId: () => 'u1',
+      storage: _MemoryPicks(),
+      prefs: _MemoryPrefs(),
+    );
+
+    final loaded = await loader.load() as TasteMapLoaded;
+    expect(loaded.usedFallback, isTrue);
+  });
+
+  test('offline with no GPS still shows the saved picks', () async {
+    final storage = _MemoryPicks();
+    final prefs = _MemoryPrefs();
+    final online = TasteMapLoader(
+      location: const _FakeLocation(),
+      recommendations: _FakeRecommendations(),
+      currentUserId: () => 'u1',
+      storage: storage,
+      prefs: prefs,
+    );
+    await online.load();
+    await pumpEventQueue();
+
+    final offline = TasteMapLoader(
+      location: const _BrokenLocation(hangs: true),
+      recommendations: _FakeRecommendations(error: const SocketException('offline')),
+      currentUserId: () => 'u1',
+      storage: storage,
+      prefs: prefs,
+      locationTimeout: const Duration(milliseconds: 10),
+    );
+    final loaded = await offline.load() as TasteMapLoaded;
+    expect(loaded.offlineSavedAt, isNotNull);
+    expect(loaded.picks.single.id, 'nitro-coffee');
+    expect(loaded.userLat, 4.65);
   });
 
   test('reports signed out when there is no user', () async {

@@ -13,6 +13,7 @@ import '../services/best_for_you_loader.dart';
 import '../services/best_for_you_service.dart';
 import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
+import '../services/place_detail_loader.dart';
 import '../services/nearby_favorites_loader.dart';
 import '../services/popularity_loader.dart';
 import '../services/popularity_prefs.dart';
@@ -312,6 +313,11 @@ class _HomeShellState extends State<HomeShell> {
               telemetry: _telemetry,
               currentUserId: () => widget.session.userId,
               onOpenSpot: _openSpot,
+              prefetchDetails: (ids) => prefetchPlaceDetails(
+                spotIds: ids,
+                fetch: _spots.fetchSpot,
+                storage: const SqliteSpotDetailStorage(),
+              ),
             ),
             SavedPlacesScreen(
               spots: _favorites.spots,
