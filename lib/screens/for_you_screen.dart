@@ -26,6 +26,11 @@ class ForYouScreen extends StatefulWidget {
 
   /// Opening a spot from search results, which BQ3 counts as a search.
   final ValueChanged<String>? onOpenFromSearch;
+
+  /// Opening a spot from a compatibility recommendation, which BQ9 follows:
+  /// "Best for you right now" and the feed when it is sorted by the
+  /// student's match. Null opens them like any other spot.
+  final ValueChanged<String>? onOpenRecommended;
   final PopularityLoader popularLoader;
 
   /// Smart feature: compatibility 0-100 calculated by the backend for this
@@ -64,6 +69,7 @@ class ForYouScreen extends StatefulWidget {
     required this.popularLoader,
     this.onOpenSpot,
     this.onOpenFromSearch,
+    this.onOpenRecommended,
     this.matchScores,
     this.matchesOfflineSince,
     this.weather,
@@ -251,7 +257,12 @@ class _ForYouScreenState extends State<ForYouScreen> {
     feed = orderForWeather(feed, weather);
     final note = weatherNote(weather);
     _feed = feed;
-    final openSpot = searching ? widget.onOpenFromSearch : widget.onOpenSpot;
+    final openRecommended = widget.onOpenRecommended ?? widget.onOpenSpot;
+    // BQ9: the feed is a compatibility recommendation only when it is sorted
+    // by this student's match; search results and the catalog order are not.
+    final openSpot = searching
+        ? widget.onOpenFromSearch
+        : (scores != null ? openRecommended : widget.onOpenSpot);
 
     return SafeArea(
       bottom: false,
@@ -360,7 +371,7 @@ class _ForYouScreenState extends State<ForYouScreen> {
                 child: BestForYouSection(
                   state: _best,
                   onRetry: _retryBest,
-                  onOpenSpot: widget.onOpenSpot,
+                  onOpenSpot: openRecommended,
                 ),
               ),
             if (!searching)

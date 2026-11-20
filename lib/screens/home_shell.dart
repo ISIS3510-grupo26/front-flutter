@@ -34,6 +34,7 @@ import '../repositories/wait_times_repository.dart';
 import '../services/preferences_service.dart';
 import '../services/preferences_sync.dart';
 import '../services/reconnect_retry.dart';
+import '../services/recommendation_visit_tracker.dart';
 import '../services/shake_detector.dart';
 import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
@@ -75,6 +76,13 @@ class _HomeShellState extends State<HomeShell> {
     client: _http,
     store: FileTelemetryStore(),
     connectivity: Connectivity().onConnectivityChanged,
+  );
+  // BQ9: recommendations opened and the visits that followed. The events go
+  // through the persistent telemetry queue.
+  late final _visits = RecommendationVisitTracker(
+    send: _telemetry.enqueue,
+    currentUserId: () => widget.session.userId,
+    onVisited: _greetVisit,
   );
   late final _favorites = FavoritesController(
     repository: _api,
@@ -151,6 +159,7 @@ class _HomeShellState extends State<HomeShell> {
     _reviewEvents.flush(); // BQ13 events left from before (crashes found in main, offline attempts)
     _sendSavedWaitReports();
     _connectionChanges = Connectivity().onConnectivityChanged.listen(_onConnectionChanged);
+    _visits.startWatching();
   }
 
   /// When the connection comes back: send the saved BQ13 events, and if the feed is showing saved percentages, 
@@ -234,7 +243,13 @@ class _HomeShellState extends State<HomeShell> {
 
   void _onAppStateChange(AppLifecycleState state) {
     final resumed = state == AppLifecycleState.resumed;
-    if (resumed && !_appInForeground) _loadWeather(); // back in the app: the weather may have changed
+    if (resumed && !_appInForeground) {
+      _loadWeather(); // back in the app: the weather may have changed
+      _visits.startWatching(); // the student may have walked to a recommendation meanwhile
+    }
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _visits.stopWatching(); // BQ9 never looks at the location with the app in the background
+    }
     setState(() => _appInForeground = resumed);
   }
 
@@ -251,6 +266,7 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    _visits.stopWatching();
     _shake.stop();
     _connectionChanges.cancel();
     _lifecycle.dispose();
@@ -302,6 +318,25 @@ class _HomeShellState extends State<HomeShell> {
     _loadMatches(); // a new review changes "Something new" and what similar students think
   }
 
+  /// BQ9: the spot was opened from "Best for you right now" or the feed
+  /// sorted by match. Saving the candidate never delays opening the page.
+  void _openRecommended(String id) {
+    if (_favorites.spotById(id) case final spot?) {
+      _visits
+          .recordOpen(spotId: id, latitude: spot.latitude, longitude: spot.longitude)
+          .catchError((Object e) => debugPrint("Couldn't save the BQ9 recommendation: $e"));
+    }
+    _openSpot(id);
+  }
+
+  void _greetVisit(List<String> spotIds) {
+    final names = [for (final id in spotIds) _favorites.spotById(id)?.name ?? 'your pick'];
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('You made it to ${names.join(' and ')}. Enjoy your meal! 🍽️')));
+  }
+
   void _openWaitTimes() {
     Navigator.push(
       context,
@@ -349,6 +384,7 @@ class _HomeShellState extends State<HomeShell> {
               onToggleSaved: _toggleSaved,
               onOpenSpot: _openSpot,
               onOpenFromSearch: _openFromSearch,
+              onOpenRecommended: _openRecommended,
               popularLoader: _popularLoader,
               matchScores: _matchScores?.scores,
               matchesOfflineSince: (_matchScores?.offline ?? false) ? _matchScores!.savedAt : null,
