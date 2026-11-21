@@ -49,7 +49,17 @@ class TasteMapScreen extends StatefulWidget {
 
 class _TasteMapScreenState extends State<TasteMapScreen> {
   TasteMapState _state = const TasteMapLoading();
-  int _selected = 0;
+
+  /// Micro-optimization: the selected pin lives in a ValueNotifier instead of
+  /// the screen's state. Tapping a pin rebuilds only the two pins whose look
+  /// changes and the place card, never the map, its tiles or the other pins.
+  final _selection = ValueNotifier<int>(0);
+
+  /// Micro-optimization: the map is built once per load (see [_buildMap]) and
+  /// the same widget instance is returned on every rebuild of the screen, so
+  /// Flutter skips its whole subtree when the connectivity banner or anything
+  /// else outside the map changes.
+  Widget? _map;
   late final StreamSubscription<List<ConnectivityResult>> _connectivity;
   bool _online = true;
 
@@ -83,6 +93,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   @override
   void dispose() {
     _connectivity.cancel();
+    _selection.dispose();
     super.dispose();
   }
 
@@ -133,9 +144,10 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
     if (!mounted || id != _loadId) return;
     if (silent && _showsOfflineData(state)) return;
     _reportMapDisplay(state);
+    _selection.value = 0;
     setState(() {
       _state = state;
-      _selected = 0;
+      _map = state is TasteMapLoaded ? _buildMap(state) : null;
     });
     _prefetchDetails(state);
   }
@@ -211,6 +223,65 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
     }).catchError((Object e) => debugPrint("Couldn't forward BQ14 events: $e"));
   }
 
+  /// Builds the map of one load. Called once when the picks arrive, not on
+  /// every frame, so these micro-optimizations apply:
+  /// - The pins with impossible coordinates are filtered here, once: before,
+  ///   `hasValidCoordinates` (a Vincenty distance per pick) ran on every
+  ///   rebuild of the screen.
+  /// - One tile provider per load instead of a new `CachedTileProvider` (and
+  ///   its headers map) on every rebuild.
+  /// - Each pin listens to [_selection] by itself (_PinSlot).
+  Widget _buildMap(TasteMapLoaded state) {
+    final TasteMapLoaded(:picks, :userLat, :userLng) = state;
+    final validPins = [
+      for (var i = 0; i < picks.length; i++)
+        // A pin with impossible coordinates is not drawn (BQ14 reports it as
+        // invalid_coordinates).
+        if (hasValidCoordinates(picks[i], userLat, userLng)) i,
+    ];
+    return FlutterMap(
+      options: MapOptions(
+        initialCenter: LatLng(userLat, userLng),
+        initialZoom: 17,
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.example.campus_bites',
+          tileProvider: CachedTileProvider(),
+          errorTileCallback: (_, _, _) => _reportTilesFailed(),
+          // A tile that failed offline is loaded again when it
+          // is needed, instead of staying blank after reconnecting.
+          evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
+        ),
+        MarkerLayer(
+          markers: [
+            Marker(
+              point: LatLng(userLat, userLng),
+              width: 18,
+              height: 18,
+              child: const _UserDot(),
+            ),
+            for (final i in validPins)
+              Marker(
+                point: LatLng(picks[i].latitude, picks[i].longitude),
+                // Tall enough for the selected pin, which adds
+                // a 3px white border on top of the base size.
+                width: 110,
+                height: 52,
+                alignment: Alignment.topCenter,
+                child: _PinSlot(
+                  index: i,
+                  pick: picks[i],
+                  selection: _selection,
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -282,68 +353,12 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                 _FailedView(reason: reason, onRetry: () => _load(forceRefresh: true)),
               TasteMapLoaded(
                 :final picks,
-                :final userLat,
-                :final userLng,
                 :final usedFallback,
                 :final offlineSavedAt,
               ) =>
                 Stack(
                   children: [
-                    FlutterMap(
-                      options: MapOptions(
-                        initialCenter: LatLng(userLat, userLng),
-                        initialZoom: 17,
-                      ),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.example.campus_bites',
-                          tileProvider: CachedTileProvider(),
-                          errorTileCallback: (_, _, _) => _reportTilesFailed(),
-                          // A tile that failed offline is loaded again when it
-                          // is needed, instead of staying blank after reconnecting.
-                          evictErrorTileStrategy:
-                              EvictErrorTileStrategy.notVisibleRespectMargin,
-                        ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              point: LatLng(userLat, userLng),
-                              width: 18,
-                              height: 18,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: AppColors.tomato,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 3),
-                                ),
-                              ),
-                            ),
-                            for (var i = 0; i < picks.length; i++)
-                              // A pin with impossible coordinates is not
-                              // drawn (BQ14 reports it as invalid_coordinates).
-                              if (hasValidCoordinates(picks[i], userLat, userLng))
-                                Marker(
-                                  point: LatLng(
-                                    picks[i].latitude,
-                                    picks[i].longitude,
-                                  ),
-                                  // Tall enough for the selected pin, which adds
-                                  // a 3px white border on top of the base size.
-                                  width: 110,
-                                  height: 52,
-                                  alignment: Alignment.topCenter,
-                                  child: _Pin(
-                                    pick: picks[i],
-                                    selected: i == _selected,
-                                    onTap: () => setState(() => _selected = i),
-                                  ),
-                                ),
-                          ],
-                        ),
-                      ],
-                    ),
+                    _map!,
                     Positioned(
                       top: 16,
                       right: 16,
@@ -394,12 +409,15 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                           if (picks.isEmpty)
                             const _NoPicksCard()
                           else
-                            _SelectedPlaceCard(
-                              pick: picks[_selected],
-                              rank: _selected + 1,
-                              onOpen: widget.onOpenSpot == null
-                                  ? null
-                                  : () => widget.onOpenSpot!(picks[_selected].id),
+                            ValueListenableBuilder<int>(
+                              valueListenable: _selection,
+                              builder: (context, selected, _) => _SelectedPlaceCard(
+                                pick: picks[selected],
+                                rank: selected + 1,
+                                onOpen: widget.onOpenSpot == null
+                                    ? null
+                                    : () => widget.onOpenSpot!(picks[selected].id),
+                              ),
                             ),
                         ],
                       ),
@@ -514,6 +532,62 @@ class _NoPicksCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _UserDot extends StatelessWidget {
+  const _UserDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.tomato,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 3),
+      ),
+    );
+  }
+}
+
+/// One pin that rebuilds only when it becomes selected or stops being
+/// selected. With N pins, a tap rebuilds 2 of them instead of N.
+class _PinSlot extends StatefulWidget {
+  final int index;
+  final NearbyPick pick;
+  final ValueNotifier<int> selection;
+
+  const _PinSlot({required this.index, required this.pick, required this.selection});
+
+  @override
+  State<_PinSlot> createState() => _PinSlotState();
+}
+
+class _PinSlotState extends State<_PinSlot> {
+  late bool _selected = widget.selection.value == widget.index;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selection.addListener(_onSelectionChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.selection.removeListener(_onSelectionChanged);
+    super.dispose();
+  }
+
+  void _onSelectionChanged() {
+    final selected = widget.selection.value == widget.index;
+    if (selected != _selected) setState(() => _selected = selected);
+  }
+
+  @override
+  Widget build(BuildContext context) => _Pin(
+        pick: widget.pick,
+        selected: _selected,
+        onTap: () => widget.selection.value = widget.index,
+      );
 }
 
 class _Pin extends StatelessWidget {

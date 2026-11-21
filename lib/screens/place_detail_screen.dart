@@ -40,6 +40,9 @@ class PlaceDetailScreen extends StatefulWidget {
   /// Publishes reviews (BQ13) and keeps their drafts on the phone.
   final ReviewSubmitter reviewSubmitter;
 
+  /// Opens Compare with this spot as the first one. Null hides the button.
+  final ValueChanged<String>? onCompare;
+
   const PlaceDetailScreen({
     super.key,
     required this.spotId,
@@ -51,6 +54,7 @@ class PlaceDetailScreen extends StatefulWidget {
     required this.onToggleSaved,
     required this.reviewSubmitter,
     this.storage = const SqliteSpotDetailStorage(),
+    this.onCompare,
   });
 
   @override
@@ -303,6 +307,12 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                           ),
                         );
                       },
+                    ),
+                  if (widget.onCompare case final compare?)
+                    IconButton(
+                      onPressed: () => compare(spot.id),
+                      tooltip: 'Compare',
+                      icon: const Icon(Icons.compare_arrows, color: AppColors.espresso),
                     ),
                   IconButton(
                     onPressed: () => _share(spot),
