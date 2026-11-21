@@ -15,6 +15,7 @@ import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
 import '../services/place_detail_loader.dart';
 import '../services/reconnect_retry.dart';
+import '../services/review_interactions.dart';
 import '../services/review_submitter.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
@@ -43,6 +44,10 @@ class PlaceDetailScreen extends StatefulWidget {
   /// Opens Compare with this spot as the first one. Null hides the button.
   final ValueChanged<String>? onCompare;
 
+  /// Opens "All reviews" from "Student Reviews (N)", with the BQ8 actions of
+  /// this visit. Null leaves the title as plain text.
+  final void Function(SpotDetail spot, ReviewInteractionTracker? interactions)? onOpenAllReviews;
+
   const PlaceDetailScreen({
     super.key,
     required this.spotId,
@@ -55,6 +60,7 @@ class PlaceDetailScreen extends StatefulWidget {
     required this.reviewSubmitter,
     this.storage = const SqliteSpotDetailStorage(),
     this.onCompare,
+    this.onOpenAllReviews,
   });
 
   @override
@@ -77,6 +83,9 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
 
   /// True while the reloads after a reconnection are running.
   bool _reconnecting = false;
+
+  /// BQ8: the review actions of this visit (set once the visit is reported).
+  ReviewInteractionTracker? _interactions;
   late final StreamSubscription<List<ConnectivityResult>> _connectivity;
 
   @override
@@ -142,14 +151,22 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   }
 
   void _report(int durationMs, {int? httpStatus, Object? error}) {
-    widget.telemetry.enqueue(TelemetryEvent.restaurantDetail(
+    final visit = TelemetryEvent.restaurantDetail(
       spotId: widget.spotId,
       userId: widget.currentUserId(),
       durationMs: durationMs,
       success: error == null,
       httpStatus: error is ApiException ? error.statusCode : httpStatus,
       errorType: error == null ? null : _errorType(error),
-    ));
+    );
+    // BQ8: the review actions of this visit are tied to this event.
+    _interactions = ReviewInteractionTracker(
+      spotId: widget.spotId,
+      visitEventId: visit.eventId,
+      currentUserId: widget.currentUserId,
+      send: widget.telemetry.enqueue,
+    );
+    widget.telemetry.enqueue(visit);
   }
 
   /// Same categories as the Kotlin app, so BQ2 can compare both apps.
@@ -557,6 +574,9 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                   hint: widget.canReview ? null : 'Sign in with an account to leave a review.',
                   offline: _offlineSavedAt != null,
                   hasDraft: widget.reviewSubmitter.store.hasDraft(spot.id),
+                  onSeeAll: widget.onOpenAllReviews == null
+                      ? null
+                      : () => widget.onOpenAllReviews!(spot, _interactions),
                 ),
                 const SizedBox(height: 10),
                 for (final review in spot.reviews) ...[
@@ -621,12 +641,16 @@ class _ReviewsHeader extends StatelessWidget {
   /// The student left a review half written here (saved in Hive).
   final bool hasDraft;
 
+  /// Opens "All reviews"; null leaves the title as plain text.
+  final VoidCallback? onSeeAll;
+
   const _ReviewsHeader({
     required this.totalReviews,
     required this.onWrite,
     this.hint,
     this.offline = false,
     this.hasDraft = false,
+    this.onSeeAll,
   });
 
   @override
@@ -637,12 +661,24 @@ class _ReviewsHeader extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Text(
-                'Student Reviews ($totalReviews)',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.espresso,
+              child: InkWell(
+                onTap: onSeeAll,
+                borderRadius: BorderRadius.circular(8),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Student Reviews ($totalReviews)',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.espresso,
+                        ),
+                      ),
+                    ),
+                    if (onSeeAll != null)
+                      const Icon(Icons.chevron_right, color: AppColors.tomato),
+                  ],
                 ),
               ),
             ),
