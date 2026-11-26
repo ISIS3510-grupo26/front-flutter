@@ -2,14 +2,19 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:campus_bites/main.dart';
+import 'package:campus_bites/models/auth_user.dart';
 import 'package:campus_bites/models/review_page.dart';
 import 'package:campus_bites/models/telemetry_event.dart';
 import 'package:campus_bites/repositories/api_exception.dart';
+import 'package:campus_bites/repositories/auth_repository.dart';
 import 'package:campus_bites/services/all_reviews_loader.dart';
+import 'package:campus_bites/services/auth_session.dart';
 import 'package:campus_bites/services/helpful_queue.dart';
 import 'package:campus_bites/services/review_interactions.dart';
 import 'package:campus_bites/services/reviews_local_store.dart';
 import 'package:campus_bites/services/reviews_service.dart';
+import 'package:campus_bites/services/token_store.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
@@ -269,11 +274,22 @@ void main() {
     });
 
     test('signing out empties the saved pages and the pending votes', () async {
+      final session = AuthSession(
+        repository: _AcceptingAuth(),
+        store: _MemoryTokens(const AuthUser(userId: 'u1', email: 'a@uniandes.edu.co', accessToken: 't')),
+        devUserId: '',
+      );
+      clearOnSignOut(session, store.clear); // what main() does
+      await session.restore();
       await loader().load(const ReviewQuery(spotId: _spot));
       await Future<void>.delayed(const Duration(milliseconds: 50));
       await store.queue(_spot, 1, desired: true);
+      expect(store.saved(_spot), isNotNull); // signing in keeps them
 
-      await store.clear();
+      await session.signOut();
+      for (var i = 0; i < 100 && (store.saved(_spot) != null || store.pending.isNotEmpty); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
 
       expect(store.saved(_spot), isNull);
       expect(store.pending, isEmpty);
@@ -421,4 +437,21 @@ class _GatedService implements ReviewsService {
 
   @override
   Future<void> setHelpful(String spotId, int reviewId, String userId, {required bool helpful}) async {}
+}
+
+class _MemoryTokens extends Fake implements TokenStore {
+  AuthUser? user;
+
+  _MemoryTokens(this.user);
+
+  @override
+  Future<AuthUser?> read() async => user;
+
+  @override
+  Future<void> clear() async => user = null;
+}
+
+class _AcceptingAuth extends Fake implements AuthRepository {
+  @override
+  Future<void> verify(String accessToken) async {}
 }
