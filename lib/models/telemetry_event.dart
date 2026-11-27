@@ -110,6 +110,23 @@ class TelemetryEvent {
         errorType = null,
         occurredAt = (occurredAt ?? DateTime.now()).toUtc();
 
+  /// BQ8: during the visit to [spotId] whose restaurant_detail event is
+  /// [visitEventId], the student used the reviews ([action]). The id is
+  /// derived from both, so the same action twice in one visit is one event
+  /// (the backend also ignores a repeated id).
+  TelemetryEvent.reviewInteraction({
+    required String this.spotId,
+    required String visitEventId,
+    required ReviewAction action,
+    this.userId,
+  })  : eventId = 'rvi-$visitEventId-${action.wire}',
+        screen = 'review_interaction',
+        durationMs = 0,
+        success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = DateTime.now().toUtc();
+
   /// Reads back an event written with [toJson] (the BQ14 offline outbox).
   /// Keeps the same eventId, so a resend is never counted twice.
   TelemetryEvent.fromJson(Map<String, dynamic> json)
@@ -144,4 +161,18 @@ class TelemetryEvent {
         for (var i = 0; i < 16; i++)
           _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
       ].join();
+}
+
+/// What the student did with the reviews (BQ8), with the name the backend
+/// expects at the end of the eventId.
+enum ReviewAction {
+  openAll('open_all'),
+  sort('sort'),
+  filter('filter'),
+  search('search'),
+  helpful('helpful');
+
+  final String wire;
+
+  const ReviewAction(this.wire);
 }

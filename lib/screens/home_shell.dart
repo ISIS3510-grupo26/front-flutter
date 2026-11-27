@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/best_for_you.dart';
+import '../models/spot_detail.dart';
 import '../models/telemetry_event.dart';
 import '../repositories/favorites_repository.dart';
 import '../repositories/spots_repository.dart';
@@ -28,7 +29,12 @@ import '../services/telemetry_queue.dart';
 import '../services/telemetry_store.dart';
 import '../services/hive_store.dart';
 import '../services/match_scores_cache.dart';
+import '../services/all_reviews_loader.dart';
+import '../services/helpful_queue.dart';
 import '../services/review_event_outbox.dart';
+import '../services/review_interactions.dart';
+import '../services/reviews_local_store.dart';
+import '../services/reviews_service.dart';
 import '../services/review_submitter.dart';
 import '../services/wait_times_store.dart';
 import '../repositories/matches_repository.dart';
@@ -43,6 +49,7 @@ import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
 import '../widgets/compare_picker_sheet.dart';
 import 'change_password_screen.dart';
+import 'all_reviews_screen.dart';
 import 'compare_screen.dart';
 import 'for_you_screen.dart';
 import 'place_detail_screen.dart';
@@ -64,7 +71,16 @@ class HomeShell extends StatefulWidget {
   /// Hive boxes with the saved places and the saves made offline.
   final FavoritesLocalStore favoritesStore;
 
-  const HomeShell({super.key, required this.session, required this.store, required this.favoritesStore});
+  /// Hive boxes with the saved review pages and the Helpful votes made offline.
+  final ReviewsLocalStore reviewsStore;
+
+  const HomeShell({
+    super.key,
+    required this.session,
+    required this.store,
+    required this.favoritesStore,
+    required this.reviewsStore,
+  });
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -93,6 +109,20 @@ class _HomeShellState extends State<HomeShell> {
     telemetry: _telemetry,
     currentUserId: () => widget.session.userId,
     local: widget.favoritesStore,
+  );
+  // "All reviews": pages saved in Hive for offline use, and the Helpful
+  // votes, which outlive the screen so a vote made offline is still sent.
+  late final _reviewsService = ReviewsServiceAdapter(client: _http);
+  late final _reviewsLoader = AllReviewsLoader(
+    service: _reviewsService,
+    currentUserId: () => widget.session.userId,
+    local: widget.reviewsStore,
+  );
+  late final _helpful = HelpfulQueue(
+    service: _reviewsService,
+    local: widget.reviewsStore,
+    currentUserId: () => widget.session.userId,
+    connectivity: Connectivity().onConnectivityChanged,
   );
   late final _nearbyLoader = NearbyFavoritesLoader(
     favorites: _api,
@@ -288,6 +318,7 @@ class _HomeShellState extends State<HomeShell> {
       ..removeListener(_loadMatches)
       ..dispose();
     _favorites.dispose();
+    _helpful.dispose();
     _telemetry.dispose();
     _http.close();
     super.dispose();
@@ -326,10 +357,28 @@ class _HomeShellState extends State<HomeShell> {
           onToggleSaved: _toggleSaved,
           reviewSubmitter: _reviewSubmitter,
           onCompare: _openCompare,
+          onOpenAllReviews: _openAllReviews,
         ),
       ),
     );
     _loadMatches(); // a new review changes "Something new" and what similar students think
+  }
+
+  void _openAllReviews(SpotDetail spot, ReviewInteractionTracker? interactions) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AllReviewsScreen(
+          spotId: spot.id,
+          spotName: spot.name,
+          loader: _reviewsLoader,
+          // Voting needs a user; the dev user counts, like favorites.
+          helpful: widget.session.userId == null ? null : _helpful,
+          interactions: interactions,
+          connectivity: Connectivity().onConnectivityChanged,
+        ),
+      ),
+    );
   }
 
   /// BQ9: the spot was opened from "Best for you right now" or the feed
