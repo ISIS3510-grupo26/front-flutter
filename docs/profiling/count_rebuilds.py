@@ -24,17 +24,28 @@ def is_widget(name: str) -> bool:
             and ' ' not in name and '::' not in name and '.' not in name)
 
 
-def main(path: str) -> None:
+def main(path: str, per: str = '_SelectedPlaceCard', tracked: list[str] = TRACKED, unit: str = 'tap') -> None:
     events = json.load(open(path, encoding='utf-8'))['traceEvents']
     builds = collections.Counter(e['name'] for e in events
                                  if e.get('ph') in ('B', 'X') and e.get('cat', '') != 'Embedder')
-    taps = builds['_SelectedPlaceCard']
+    taps = builds[per]
     widgets = sum(n for name, n in builds.items() if is_widget(name))
-    print(f'taps in the trace: {taps}')
-    print(f'widget builds per tap: {widgets / taps:.1f}')
-    for name in TRACKED:
-        print(f'  {name}: {builds[name] / taps:.2f} per tap')
+    if taps == 0:  # nothing is built once per action (a scroll): totals for the whole trace
+        print(f'widget builds in the trace: {widgets}')
+        for name in tracked:
+            print(f'  {name}: {builds[name]} in total')
+        return
+    print(f'{unit}s in the trace: {taps}')
+    print(f'widget builds per {unit}: {widgets / taps:.1f}')
+    for name in tracked:
+        print(f'  {name}: {builds[name] / taps:.2f} per {unit}')
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    # Taste Map (default):  count_rebuilds.py <timeline.json>
+    # Any other screen:     count_rebuilds.py <timeline.json> <widget built once per action> <tracked,widgets>
+    #   e.g. count_rebuilds.py build/reviews_rebuild_builds.timeline.json PlaceDetailScreen _ReviewCard,_Avatar
+    if len(sys.argv) > 2:
+        main(sys.argv[1], sys.argv[2], sys.argv[3].split(',') if len(sys.argv) > 3 else [], unit='action')
+    else:
+        main(sys.argv[1])
