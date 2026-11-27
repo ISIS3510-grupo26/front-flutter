@@ -12,6 +12,8 @@ import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/best_for_you_loader.dart';
 import '../services/best_for_you_service.dart';
+import '../services/best_time_loader.dart';
+import '../services/best_time_service.dart';
 import '../services/compare_loader.dart';
 import '../services/comparison_history.dart';
 import '../services/favorites_controller.dart';
@@ -50,6 +52,7 @@ import '../widgets/campus_bottom_nav_bar.dart';
 import '../widgets/compare_picker_sheet.dart';
 import 'change_password_screen.dart';
 import 'all_reviews_screen.dart';
+import 'best_time_screen.dart';
 import 'compare_screen.dart';
 import 'for_you_screen.dart';
 import 'place_detail_screen.dart';
@@ -146,6 +149,11 @@ class _HomeShellState extends State<HomeShell> {
   late final _matches = MatchesRepository(client: _http);
   late final _waitTimes = WaitTimesRepository(client: _http);
   final _waitStore = WaitTimesStore();
+  // Best time to go (BQ15, Sprint 4): its offline copy goes to the same SQLite database as the wait times.
+  late final _bestTimeLoader = BestTimeLoader(
+    service: BestTimeServiceAdapter(client: _http),
+    storage: _waitStore,
+  );
   // BQ13 events saved in Hive until the backend gets them,
   // reviews that record every attempt, and the cached compatibility %.
   late final _reviewEvents = ReviewEventOutbox(
@@ -429,7 +437,21 @@ class _HomeShellState extends State<HomeShell> {
   void _openWaitTimes() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => WaitTimesScreen(repository: _waitTimes, store: _waitStore, onOpenSpot: _openSpot)),
+      MaterialPageRoute(
+        builder: (_) => WaitTimesScreen(
+          repository: _waitTimes,
+          store: _waitStore,
+          onOpenSpot: _openSpot,
+          onOpenBestTime: _openBestTime,
+        ),
+      ),
+    );
+  }
+
+  void _openBestTime() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BestTimeScreen(loader: _bestTimeLoader, onOpenSpot: _openSpot)),
     );
   }
 

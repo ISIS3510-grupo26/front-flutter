@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' show Timeline;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
@@ -100,6 +101,23 @@ class _ForYouScreenState extends State<ForYouScreen> {
   List<Spot> _feed = const [];
   bool _pickOpen = false;
 
+  /// Micro-optimization (Sprint 4): the search as it counts for the feed, without spaces at the ends. The 
+  /// controller also notifies when the cursor moves, text is selected or the keyboard updates its suggestion, 
+  /// and none of that changes the feed, so the screen only rebuilds when this changes or the box goes from 
+  /// empty to not empty (the clear button).
+  String _query = '';
+  bool _searchBoxEmpty = true;
+
+  /// [_activeFilters] is a set that changes in place, so this number goes up
+  /// on every change and tells the memoized feed that the filters are new.
+  int _filtersVersion = 0;
+
+  /// Micro-optimization (Sprint 4), memoization: what the last feed was calculated from, and its cards. While 
+  /// these inputs are the same, build() reuses the same list and the same SpotCard objects; Flutter sees the 
+  /// same widget instance and skips rebuilding each card.
+  Object? _feedInputs;
+  List<Widget> _cards = const [];
+
   /// Coming back to the app reloads the sections: recent data comes from
   /// their LRU caches, and after the hour changes Popular shows the new hour.
   late final AppLifecycleListener _lifecycle;
@@ -109,7 +127,7 @@ class _ForYouScreenState extends State<ForYouScreen> {
     super.initState();
     _lifecycle = AppLifecycleListener(onResume: _loadSections);
     _connectivity = widget.connectivity?.listen(_onConnectivityChanged);
-    _search.addListener(() => setState(() {}));
+    _search.addListener(_onSearchChanged);
     _loadSections();
     _syncShake();
   }
@@ -233,6 +251,19 @@ class _ForYouScreenState extends State<ForYouScreen> {
       } else {
         _activeFilters.add(filter);
       }
+      _filtersVersion++;
+    });
+  }
+
+  /// Before: every notification of the controller was a setState of the whole screen. Now only a change the 
+  /// student can see is.
+  void _onSearchChanged() {
+    final query = _search.text.trim();
+    final empty = _search.text.isEmpty;
+    if (query == _query && empty == _searchBoxEmpty) return;
+    setState(() {
+      _query = query;
+      _searchBoxEmpty = empty;
     });
   }
 
@@ -240,29 +271,51 @@ class _ForYouScreenState extends State<ForYouScreen> {
   Widget build(BuildContext context) {
     // While searching, the filters and Popular right now step aside, as in
     // the Kotlin app: the list shows every spot that matches the text.
-    final query = _search.text.trim();
+    final query = _query;
     final searching = query.isNotEmpty;
     final scores = widget.matchScores;
-    var feed = [
-      for (final spot in widget.spots)
-        if (searching ? spot.matchesSearch(query) : _activeFilters.every(spot.matchesFilter))
-          scores?[spot.id] == null ? spot : spot.copyWith(affinityPercent: scores![spot.id]),
-    ];
-    if (scores != null) {
-      feed.sort((a, b) => b.affinityPercent.compareTo(a.affinityPercent));
-    }
     // Context aware: with rain, the closest places go first. Not while
     // searching: then the student is looking for something specific.
     final weather = _ignoreWeather || searching ? null : widget.weather;
-    feed = orderForWeather(feed, weather);
     final note = weatherNote(weather);
-    _feed = feed;
     final openRecommended = widget.onOpenRecommended ?? widget.onOpenSpot;
     // BQ9: the feed is a compatibility recommendation only when it is sorted
     // by this student's match; search results and the catalog order are not.
     final openSpot = searching
         ? widget.onOpenFromSearch
         : (scores != null ? openRecommended : widget.onOpenSpot);
+
+    // Memoization: everything the feed and its cards depend on. A record compares field by field; the lists and 
+    //maps by identity, which works because HomeShell gives a new list or map when they change (it never
+    // edits them in place).
+    final inputs = (widget.spots, scores, query, _filtersVersion, weather, openSpot, widget.onToggleSaved);
+    if (inputs != _feedInputs) {
+      _feedInputs = inputs;
+      // Profiling (Sprint 4): every time the feed is calculated it shows up in the timeline as a "ForYouFeed" 
+      //event (DevTools > Performance).
+      _feed = Timeline.timeSync('ForYouFeed', () {
+        final list = [
+          for (final spot in widget.spots)
+            if (searching ? spot.matchesSearch(query) : _activeFilters.every(spot.matchesFilter))
+              scores?[spot.id] == null ? spot : spot.copyWith(affinityPercent: scores![spot.id]),
+        ];
+        if (scores != null) {
+          list.sort((a, b) => b.affinityPercent.compareTo(a.affinityPercent));
+        }
+        return orderForWeather(list, weather);
+      });
+      _cards = [
+        for (final spot in _feed)
+          SpotCard(
+            key: ValueKey(spot.id),
+            spot: spot,
+            onToggleSaved: () => widget.onToggleSaved(spot.id),
+            onTap: openSpot == null ? null : () => openSpot(spot.id),
+          ),
+      ];
+    }
+    final feed = _feed;
+    final cards = _cards;
 
     return SafeArea(
       bottom: false,
@@ -403,16 +456,10 @@ class _ForYouScreenState extends State<ForYouScreen> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                 sliver: SliverList.separated(
-                  itemCount: feed.length,
+                  itemCount: cards.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 14),
-                  itemBuilder: (context, index) {
-                    final spot = feed[index];
-                    return SpotCard(
-                      spot: spot,
-                      onToggleSaved: () => widget.onToggleSaved(spot.id),
-                      onTap: openSpot == null ? null : () => openSpot(spot.id),
-                    );
-                  },
+                  // The same card object as the last build while the feed is the same.
+                  itemBuilder: (context, index) => cards[index],
                 ),
               ),
           ],
