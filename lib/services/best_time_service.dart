@@ -25,9 +25,7 @@ class BestTimeServiceAdapter implements BestTimeService {
   final http.Client _client;
   final String _baseUrl;
 
-  BestTimeServiceAdapter({required http.Client client, String baseUrl = ApiConfig.baseUrl})
-      : _client = client,
-        _baseUrl = baseUrl;
+  BestTimeServiceAdapter({required this._client, this._baseUrl = ApiConfig.baseUrl});
 
   @override
   Future<BestTimeReport> report({required int days, required int tzOffsetMinutes}) async {

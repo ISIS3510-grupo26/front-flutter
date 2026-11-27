@@ -51,12 +51,10 @@ class BestTimeLoader {
   /// Caching strategy: LRU cache keyed by the window (7 or 28 days), with capacity = 2 and ttl = 10 minutes. 
   /// The screen only offers two windows, so both fit and switching between the chips never calls the backend again.
   BestTimeLoader({
-    required BestTimeService service,
-    required BestTimeStorage storage,
+    required this._service,
+    required this._storage,
     DateTime Function()? now,
-  })  : _service = service,
-        _storage = storage,
-        _now = now ?? DateTime.now,
+  })  : _now = now ?? DateTime.now,
         _cache = LruCache(capacity: 2, ttl: const Duration(minutes: 10), now: now ?? DateTime.now);
 
   /// Multithreading strategy: async/await. Each step waits for the previous one without blocking the UI thread. 

@@ -1,7 +1,7 @@
-/// BQ15 (type 2): "At what time of the day is the reported waiting time at
-/// each restaurant the shortest?"
-/// It uses the same reports students make in "Wait times now" (BQ4), grouped
-/// by the local hour when they were made.
+// BQ15 (type 2): "At what time of the day is the reported waiting time at
+// each restaurant the shortest?"
+// It uses the same reports students make in "Wait times now" (BQ4), grouped
+// by the local hour when they were made.
 
 /// The average wait reported at one hour of the day.
 class HourlyWait {
