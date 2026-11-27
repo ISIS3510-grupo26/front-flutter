@@ -43,7 +43,7 @@ twice:
 shows how many times the feed was calculated and how long it took.
 
 Tool: Flutter timeline recorded by `integration_test` (`binding.traceAction`) in **profile mode**, summarized by
-`flutter_driver`'s `TimelineSummary`. Device: **(phone model, Android version)**. 3 runs before and 3 after.
+`flutter_driver`'s `TimelineSummary`. Device: **(Galaxy Z Flip5, Android 16)**. 3 runs before and 3 after.
 
 ```
 flutter drive --profile --no-dds --driver=test_driver/perf_driver.dart --target=integration_test/for_you_search_perf_test.dart
@@ -56,6 +56,23 @@ python docs/profiling/for_you_search/profiling.py table
 `Micro-optimización: For You calcula el feed...`.
 
 ## Results
+
+| Metric | Before (median) | After (median) | Change | Before, runs | After, runs |
+|---|---|---|---|---|---|
+| feed_per_edit | 0.59 | 0.38 | -36% | 0.59 / 0.59 / 0.59 | 0.38 / 0.38 / 0.38 |
+| feed_ms_per_edit | 0.126 | 0.051 | -60% | 0.126 / 0.124 / 0.13 | 0.051 / 0.066 / 0.051 |
+| widgets_per_edit | 371.6 | 270 | -27% | 371.1 / 372.6 / 371.6 | 270 / 270 / 270 |
+| ForYouScreen_per_edit | 0.59 | 0.38 | -36% | 0.59 / 0.59 / 0.59 | 0.38 / 0.38 / 0.38 |
+| SpotCard_per_edit | 2.5 | 1.5 | -40% | 2.5 / 2.5 / 2.5 | 1.5 / 1.5 / 1.5 |
+| SpotPhoto_per_edit | 2.5 | 1.5 | -40% | 2.5 / 2.5 / 2.5 | 1.5 / 1.5 / 1.5 |
+| Text_per_edit | 21.53 | 14.88 | -31% | 21.53 / 21.56 / 21.53 | 14.88 / 14.88 / 14.88 |
+| avg_build_ms | 4.24 | 3.69 | -13% | 4.12 / 4.24 / 4.75 | 3.69 / 4.14 / 3.63 |
+| p90_build_ms | 7.62 | 7.64 | +0% | 7.26 / 7.62 / 8.52 | 7.1 / 9.36 / 7.64 |
+| p99_build_ms | 16.67 | 24.2 | +45% | 16.64 / 16.67 / 19.47 | 24.2 / 24.5 / 23.23 |
+| worst_build_ms | 19.06 | 25.65 | +35% | 18.5 / 19.06 / 28.26 | 24.87 / 25.65 / 25.98 |
+| avg_build_ms_builds_on | 5.85 | 4.06 | -31% | 4.44 / 5.85 / 6.02 | 4.06 / 4.37 / 3.77 |
+| missed_budget_builds_on | 1 | 3 | +200% | 0 / 1 / 1 | 2 / 3 / 3 |
+| gc_ms | 17 | 18.9 | +11% | 14.4 / 17 / 17 | 20.6 / 17.8 / 18.9 |
 
 (table from `profiling.py table`)
 
@@ -72,6 +89,6 @@ What each row means:
 ## Files
 
 - `before/run1..3`, `after/run1..3`: the `TimelineSummary` of both traces of every run. Run 1 also has the full
-  timelines (`*.timeline.json`): open them in Flutter DevTools (Performance, Load data) to see every frame and the
+  timelines (`*.timeline.json`): open them in Perfetto (ui.perfetto.dev, Open trace file) to see every frame and the
   `ForYouFeed` events.
 - `before/results.csv`, `after/results.csv`: one row per run.
