@@ -88,35 +88,39 @@ void main() {
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    final field = find.byType(TextField);
-    await tester.tap(field);
-    await tester.pump(const Duration(milliseconds: 300));
-    final controller = tester.widget<TextField>(field).controller!;
+    // The text is written straight into the controller of the search box, so
+    // every change happens at once and in the same frame on any phone. With
+    // tester.enterText the real keyboard of the phone opened and the text
+    // arrived later, so the cursor moves fell outside the text.
+    final controller = tester.widget<TextField>(find.byType(TextField)).controller!;
 
     Future<void> frame() async {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 16));
     }
 
+    Future<void> setText(String text) async {
+      controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+      await frame();
+    }
+
     Future<void> editSearch() async {
       const word = 'burger';
       for (var length = 1; length <= word.length; length++) {
-        final text = word.substring(0, length);
-        await tester.enterText(field, text);
-        await frame();
-        // Three cursor moves: the text is the same, only the selection changes.
-        for (final offset in [0, length ~/ 2, length]) {
+        await setText(word.substring(0, length));
+        // Three cursor moves (start, end, start): the text is the same, only
+        // the selection changes. Each one is different from the one before,
+        // so the controller notifies all three.
+        for (final offset in [0, length, 0]) {
           controller.selection = TextSelection.collapsed(offset: offset);
           await frame();
         }
       }
       // A space at the end: the search ignores it.
-      await tester.enterText(field, '$word ');
-      await frame();
+      await setText('$word ');
       // Deleting letter by letter until the box is empty again.
       for (var length = word.length; length >= 0; length--) {
-        await tester.enterText(field, word.substring(0, length));
-        await frame();
+        await setText(word.substring(0, length));
       }
     }
 

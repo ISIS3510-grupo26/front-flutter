@@ -101,10 +101,11 @@ class _ForYouScreenState extends State<ForYouScreen> {
   List<Spot> _feed = const [];
   bool _pickOpen = false;
 
-  /// Micro-optimization (Sprint 4): the search as it counts for the feed, without spaces at the ends. The 
-  /// controller also notifies when the cursor moves, text is selected or the keyboard updates its suggestion, 
-  /// and none of that changes the feed, so the screen only rebuilds when this changes or the box goes from 
-  /// empty to not empty (the clear button).
+  /// Micro-optimization (Sprint 4): the search as it counts for the feed,
+  /// without spaces at the ends. The controller also notifies when the cursor
+  /// moves, text is selected or the keyboard updates its suggestion, and none
+  /// of that changes the feed, so the screen only rebuilds when this changes
+  /// or the box goes from empty to not empty (the clear button).
   String _query = '';
   bool _searchBoxEmpty = true;
 
@@ -112,9 +113,10 @@ class _ForYouScreenState extends State<ForYouScreen> {
   /// on every change and tells the memoized feed that the filters are new.
   int _filtersVersion = 0;
 
-  /// Micro-optimization (Sprint 4), memoization: what the last feed was calculated from, and its cards. While 
-  /// these inputs are the same, build() reuses the same list and the same SpotCard objects; Flutter sees the 
-  /// same widget instance and skips rebuilding each card.
+  /// Micro-optimization (Sprint 4), memoization: what the last feed was
+  /// calculated from, and its cards. While these inputs are the same, build()
+  /// reuses the same list and the same SpotCard objects; Flutter sees the same
+  /// widget instance and skips rebuilding each card.
   Object? _feedInputs;
   List<Widget> _cards = const [];
 
@@ -255,8 +257,8 @@ class _ForYouScreenState extends State<ForYouScreen> {
     });
   }
 
-  /// Before: every notification of the controller was a setState of the whole screen. Now only a change the 
-  /// student can see is.
+  /// Before: every notification of the controller was a setState of the
+  /// whole screen. Now only a change the student can see is.
   void _onSearchChanged() {
     final query = _search.text.trim();
     final empty = _search.text.isEmpty;
@@ -286,8 +288,8 @@ class _ForYouScreenState extends State<ForYouScreen> {
         : (scores != null ? openRecommended : widget.onOpenSpot);
 
     // Memoization: everything the feed and its cards depend on. A record compares field by field; the lists and 
-    //maps by identity, which works because HomeShell gives a new list or map when they change (it never
-    // edits them in place).
+    // maps by identity, which works because HomeShell gives a new list or map when they change (it never edits 
+    // them in place). Same inputs: same feed and same cards.
     final inputs = (widget.spots, scores, query, _filtersVersion, weather, openSpot, widget.onToggleSaved);
     if (inputs != _feedInputs) {
       _feedInputs = inputs;

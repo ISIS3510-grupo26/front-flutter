@@ -1,0 +1,4 @@
+run,feed_per_edit,feed_ms_per_edit,widgets_per_edit,ForYouScreen_per_edit,SpotCard_per_edit,SpotPhoto_per_edit,Text_per_edit,avg_build_ms,p90_build_ms,p99_build_ms,worst_build_ms,avg_build_ms_builds_on,missed_budget_builds_on,gc_ms
+1,0.38,0.051,270.0,0.38,1.5,1.5,14.88,3.69,7.1,24.2,24.87,4.06,2,20.6
+2,0.38,0.066,270.0,0.38,1.5,1.5,14.88,4.14,9.36,24.5,25.65,4.37,3,17.8
+3,0.38,0.051,270.0,0.38,1.5,1.5,14.88,3.63,7.64,23.23,25.98,3.77,3,18.9
