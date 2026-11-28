@@ -1,0 +1,9 @@
+actions in the trace: 21
+widget builds per action: 615.1
+  _ReviewCard: 2.10 per action
+  _Avatar: 2.10 per action
+  _ReviewsHeader: 1.05 per action
+
+widget builds in the trace: 2062
+  _ReviewCard: 9 in total
+  _Avatar: 9 in total

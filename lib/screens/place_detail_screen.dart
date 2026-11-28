@@ -68,6 +68,11 @@ class PlaceDetailScreen extends StatefulWidget {
 }
 
 class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
+  /// Micro-optimization (Sprint 4): the page shows only the first reviews;
+  /// the rest are in "All reviews", which pages them from the backend.
+  /// docs/profiling/reviews_list/ has the measurements before and after.
+  static const _previewReviews = 5;
+
   SpotDetail? _spot;
   bool _failed = false;
   bool _reviewed = false;
@@ -281,6 +286,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
   }
 
   Widget _buildPage(SpotDetail spot) {
+    final preview = spot.reviews.take(_previewReviews).toList();
     return Scaffold(
       backgroundColor: AppColors.cream,
       body: SafeArea(
@@ -341,7 +347,7 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
             ),
           ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
             sliver: SliverList.list(
               children: [
                 if (_offlineSavedAt case final savedAt?) ...[
@@ -579,11 +585,43 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                       : () => widget.onOpenAllReviews!(spot, _interactions),
                 ),
                 const SizedBox(height: 10),
-                for (final review in spot.reviews) ...[
-                  _ReviewCard(review: review),
-                  const SizedBox(height: 10),
-                ],
               ],
+            ),
+          ),
+          // Before: every review of the page was a child of the list above,
+          // so each build created all of them (200 cards and spacers) even
+          // though only a few fit on screen. Now there are at most
+          // _previewReviews, built lazily, and the button opens the rest.
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverList.builder(
+              itemCount: preview.length,
+              itemBuilder: (context, index) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _ReviewCard(review: preview[index]),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            sliver: SliverToBoxAdapter(
+              child: spot.totalReviews > preview.length && widget.onOpenAllReviews != null
+                  ? OutlinedButton(
+                      // Same as the title: opens All reviews, which sends
+                      // open_all (BQ8) for this visit.
+                      onPressed: () => widget.onOpenAllReviews!(spot, _interactions),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.tomato,
+                        side: const BorderSide(color: AppColors.tomato),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: Text(
+                        'See all reviews (${spot.totalReviews})',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ),
         ],
