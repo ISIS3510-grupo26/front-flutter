@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/best_for_you.dart';
+import '../models/spot_detail.dart';
 import '../models/telemetry_event.dart';
 import '../repositories/favorites_repository.dart';
 import '../repositories/spots_repository.dart';
@@ -11,8 +12,14 @@ import '../services/auth_client.dart';
 import '../services/auth_session.dart';
 import '../services/best_for_you_loader.dart';
 import '../services/best_for_you_service.dart';
+import '../services/best_time_loader.dart';
+import '../services/best_time_service.dart';
+import '../services/compare_loader.dart';
+import '../services/comparison_history.dart';
 import '../services/favorites_controller.dart';
+import '../services/favorites_local_store.dart';
 import '../services/local_database.dart';
+import '../services/place_detail_loader.dart';
 import '../services/nearby_favorites_loader.dart';
 import '../services/popularity_loader.dart';
 import '../services/popularity_prefs.dart';
@@ -24,18 +31,29 @@ import '../services/telemetry_queue.dart';
 import '../services/telemetry_store.dart';
 import '../services/hive_store.dart';
 import '../services/match_scores_cache.dart';
+import '../services/all_reviews_loader.dart';
+import '../services/helpful_queue.dart';
 import '../services/review_event_outbox.dart';
+import '../services/review_interactions.dart';
+import '../services/reviews_local_store.dart';
+import '../services/reviews_service.dart';
 import '../services/review_submitter.dart';
 import '../services/wait_times_store.dart';
 import '../repositories/matches_repository.dart';
 import '../repositories/wait_times_repository.dart';
 import '../services/preferences_service.dart';
 import '../services/preferences_sync.dart';
+import '../services/reconnect_retry.dart';
+import '../services/recommendation_visit_tracker.dart';
 import '../services/shake_detector.dart';
 import '../services/weather_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/campus_bottom_nav_bar.dart';
+import '../widgets/compare_picker_sheet.dart';
 import 'change_password_screen.dart';
+import 'all_reviews_screen.dart';
+import 'best_time_screen.dart';
+import 'compare_screen.dart';
 import 'for_you_screen.dart';
 import 'place_detail_screen.dart';
 import 'saved_places_screen.dart';
@@ -53,7 +71,19 @@ class HomeShell extends StatefulWidget {
   /// Hive boxes opened in main(): review drafts, BQ13 events and match scores.
   final HiveStore store;
 
-  const HomeShell({super.key, required this.session, required this.store});
+  /// Hive boxes with the saved places and the saves made offline.
+  final FavoritesLocalStore favoritesStore;
+
+  /// Hive boxes with the saved review pages and the Helpful votes made offline.
+  final ReviewsLocalStore reviewsStore;
+
+  const HomeShell({
+    super.key,
+    required this.session,
+    required this.store,
+    required this.favoritesStore,
+    required this.reviewsStore,
+  });
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -70,10 +100,32 @@ class _HomeShellState extends State<HomeShell> {
     store: FileTelemetryStore(),
     connectivity: Connectivity().onConnectivityChanged,
   );
+  // BQ9: recommendations opened and the visits that followed. The events go
+  // through the persistent telemetry queue.
+  late final _visits = RecommendationVisitTracker(
+    send: _telemetry.enqueue,
+    currentUserId: () => widget.session.userId,
+    onVisited: _greetVisit,
+  );
   late final _favorites = FavoritesController(
     repository: _api,
     telemetry: _telemetry,
     currentUserId: () => widget.session.userId,
+    local: widget.favoritesStore,
+  );
+  // "All reviews": pages saved in Hive for offline use, and the Helpful
+  // votes, which outlive the screen so a vote made offline is still sent.
+  late final _reviewsService = ReviewsServiceAdapter(client: _http);
+  late final _reviewsLoader = AllReviewsLoader(
+    service: _reviewsService,
+    currentUserId: () => widget.session.userId,
+    local: widget.reviewsStore,
+  );
+  late final _helpful = HelpfulQueue(
+    service: _reviewsService,
+    local: widget.reviewsStore,
+    currentUserId: () => widget.session.userId,
+    connectivity: Connectivity().onConnectivityChanged,
   );
   late final _nearbyLoader = NearbyFavoritesLoader(
     favorites: _api,
@@ -97,6 +149,11 @@ class _HomeShellState extends State<HomeShell> {
   late final _matches = MatchesRepository(client: _http);
   late final _waitTimes = WaitTimesRepository(client: _http);
   final _waitStore = WaitTimesStore();
+  // Best time to go (BQ15, Sprint 4): its offline copy goes to the same SQLite database as the wait times.
+  late final _bestTimeLoader = BestTimeLoader(
+    service: BestTimeServiceAdapter(client: _http),
+    storage: _waitStore,
+  );
   // BQ13 events saved in Hive until the backend gets them,
   // reviews that record every attempt, and the cached compatibility %.
   late final _reviewEvents = ReviewEventOutbox(
@@ -109,6 +166,15 @@ class _HomeShellState extends State<HomeShell> {
     store: widget.store,
     currentUserId: () => widget.session.userId,
     onAttemptRecorded: _reviewEvents.flush,
+  );
+  // Compare (Sprint 4): pages in an LRU cache and in SQLite, waits from BQ4.
+  final _compareHistory = const SqliteComparisonHistory();
+  late final _compareLoader = CompareLoader(
+    fetchSpot: _spots.fetchSpot,
+    fetchWaits: _waitTimes.fetchLatest,
+    savedWaits: () async => (await _waitStore.loadSaved())?.waits,
+    saveWaits: (waits) => _waitStore.saveLatest(waits, DateTime.now()),
+    history: _compareHistory,
   );
   late final _matchCache = MatchScoresCache(repository: _matches, store: widget.store);
   late final StreamSubscription<List<ConnectivityResult>> _connectionChanges;
@@ -144,6 +210,7 @@ class _HomeShellState extends State<HomeShell> {
     _reviewEvents.flush(); // BQ13 events left from before (crashes found in main, offline attempts)
     _sendSavedWaitReports();
     _connectionChanges = Connectivity().onConnectivityChanged.listen(_onConnectionChanged);
+    _visits.startWatching();
   }
 
   /// When the connection comes back: send the saved BQ13 events, and if the feed is showing saved percentages, 
@@ -154,6 +221,14 @@ class _HomeShellState extends State<HomeShell> {
     _sendSavedWaitReports();
     _syncPreferences();
     if (_matchScores?.offline ?? false) _loadMatches(force: false);
+    if (_favorites.isOffline || _favorites.pendingIds.isNotEmpty) {
+      // The network may need a second or two after the radio connects.
+      retryAfterReconnect(() async {
+        if (!mounted) return true;
+        await _syncFavorites();
+        return !_favorites.isOffline && _favorites.pendingIds.isEmpty;
+      });
+    }
   }
 
   /// Wait times reported offline: they are sent even if the student never
@@ -219,7 +294,13 @@ class _HomeShellState extends State<HomeShell> {
 
   void _onAppStateChange(AppLifecycleState state) {
     final resumed = state == AppLifecycleState.resumed;
-    if (resumed && !_appInForeground) _loadWeather(); // back in the app: the weather may have changed
+    if (resumed && !_appInForeground) {
+      _loadWeather(); // back in the app: the weather may have changed
+      _visits.startWatching(); // the student may have walked to a recommendation meanwhile
+    }
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _visits.stopWatching(); // BQ9 never looks at the location with the app in the background
+    }
     setState(() => _appInForeground = resumed);
   }
 
@@ -236,6 +317,7 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    _visits.stopWatching();
     _shake.stop();
     _connectionChanges.cancel();
     _lifecycle.dispose();
@@ -244,16 +326,20 @@ class _HomeShellState extends State<HomeShell> {
       ..removeListener(_loadMatches)
       ..dispose();
     _favorites.dispose();
+    _helpful.dispose();
     _telemetry.dispose();
     _http.close();
     super.dispose();
   }
 
+  /// On open, on Retry and when the connection comes back. If they overlap
+  /// they share one run (see [FavoritesController.syncAll]).
+  /// Without network nothing is shown here: Saved says it is offline.
   Future<void> _syncFavorites() async {
     try {
-      await _favorites.syncFromServer();
+      await _favorites.syncAll();
     } on Exception {
-      _showError("Couldn't load your saved places.");
+      _showError("The server couldn't load your saved places.");
     }
   }
 
@@ -278,16 +364,94 @@ class _HomeShellState extends State<HomeShell> {
           favorites: _favorites,
           onToggleSaved: _toggleSaved,
           reviewSubmitter: _reviewSubmitter,
+          onCompare: _openCompare,
+          onOpenAllReviews: _openAllReviews,
         ),
       ),
     );
     _loadMatches(); // a new review changes "Something new" and what similar students think
   }
 
+  void _openAllReviews(SpotDetail spot, ReviewInteractionTracker? interactions) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AllReviewsScreen(
+          spotId: spot.id,
+          spotName: spot.name,
+          loader: _reviewsLoader,
+          // Voting needs a user; the dev user counts, like favorites.
+          helpful: widget.session.userId == null ? null : _helpful,
+          interactions: interactions,
+          connectivity: Connectivity().onConnectivityChanged,
+        ),
+      ),
+    );
+  }
+
+  /// BQ9: the spot was opened from "Best for you right now" or the feed
+  /// sorted by match. Saving the candidate never delays opening the page.
+  void _openRecommended(String id) {
+    if (_favorites.spotById(id) case final spot?) {
+      _visits
+          .recordOpen(spotId: id, latitude: spot.latitude, longitude: spot.longitude)
+          .catchError((Object e) => debugPrint("Couldn't save the BQ9 recommendation: $e"));
+    }
+    _openSpot(id);
+  }
+
+  void _greetVisit(List<String> spotIds) {
+    final names = [for (final id in spotIds) _favorites.spotById(id)?.name ?? 'your pick'];
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('You made it to ${names.join(' and ')}. Enjoy your meal! 🍽️')));
+  }
+
+  /// Compare: picks the second place (or a recent comparison) and opens the
+  /// table on top of the restaurant page.
+  Future<void> _openCompare(String firstId) async {
+    final pair = await showComparePicker(
+      context,
+      firstId: firstId,
+      catalog: _favorites.spots,
+      history: _compareHistory,
+    );
+    if (pair == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CompareScreen(
+          firstId: pair.first,
+          secondId: pair.second,
+          loader: _compareLoader,
+          catalog: _favorites.spots,
+          matchScores: _matchScores?.scores,
+          onOpenSpot: _openSpot,
+          connectivity: Connectivity().onConnectivityChanged,
+        ),
+      ),
+    );
+  }
+
   void _openWaitTimes() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => WaitTimesScreen(repository: _waitTimes, store: _waitStore, onOpenSpot: _openSpot)),
+      MaterialPageRoute(
+        builder: (_) => WaitTimesScreen(
+          repository: _waitTimes,
+          store: _waitStore,
+          onOpenSpot: _openSpot,
+          onOpenBestTime: _openBestTime,
+        ),
+      ),
+    );
+  }
+
+  void _openBestTime() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => BestTimeScreen(loader: _bestTimeLoader, onOpenSpot: _openSpot)),
     );
   }
 
@@ -331,6 +495,7 @@ class _HomeShellState extends State<HomeShell> {
               onToggleSaved: _toggleSaved,
               onOpenSpot: _openSpot,
               onOpenFromSearch: _openFromSearch,
+              onOpenRecommended: _openRecommended,
               popularLoader: _popularLoader,
               matchScores: _matchScores?.scores,
               matchesOfflineSince: (_matchScores?.offline ?? false) ? _matchScores!.savedAt : null,
@@ -347,6 +512,11 @@ class _HomeShellState extends State<HomeShell> {
               telemetry: _telemetry,
               currentUserId: () => widget.session.userId,
               onOpenSpot: _openSpot,
+              prefetchDetails: (ids) => prefetchPlaceDetails(
+                spotIds: ids,
+                fetch: _spots.fetchSpot,
+                storage: const SqliteSpotDetailStorage(),
+              ),
             ),
             SavedPlacesScreen(
               spots: _favorites.spots,
@@ -355,6 +525,8 @@ class _HomeShellState extends State<HomeShell> {
               onOpenSpot: _openSpot,
               sync: _favorites.sync,
               onRetrySync: _syncFavorites,
+              offlineSince: _favorites.copySavedAt,
+              pendingIds: _favorites.pendingIds,
             ),
             ProfileScreen(
               onSignOut: widget.session.signOut,

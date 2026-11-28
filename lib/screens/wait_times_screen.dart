@@ -18,12 +18,16 @@ class WaitTimesScreen extends StatefulWidget {
 
   final Stream<List<ConnectivityResult>>? connectionChanges;
 
+  /// Opens "Best time to go" (BQ15, Sprint 4). Null hides the button.
+  final VoidCallback? onOpenBestTime;
+
   const WaitTimesScreen({
     super.key,
     required this.repository,
     required this.store,
     required this.onOpenSpot,
     this.connectionChanges,
+    this.onOpenBestTime,
   });
 
   @override
@@ -208,6 +212,17 @@ class _WaitTimesScreenState extends State<WaitTimesScreen> {
         foregroundColor: AppColors.espresso,
         elevation: 0,
         title: const Text('Wait times now', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+        actions: [
+          if (widget.onOpenBestTime case final open?)
+            TextButton.icon(
+              onPressed: open,
+              icon: const Icon(Icons.schedule, size: 18, color: AppColors.tomato),
+              label: const Text(
+                'Best time',
+                style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.tomato),
+              ),
+            ),
+        ],
       ),
       body: SafeArea(child: _body()),
     );

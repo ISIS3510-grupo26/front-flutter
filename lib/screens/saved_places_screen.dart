@@ -6,6 +6,7 @@ import '../services/nearby_favorites_loader.dart';
 import '../theme/app_colors.dart';
 import '../widgets/count_pill.dart';
 import '../widgets/nearby_failure_view.dart';
+import '../widgets/offline_banner.dart';
 import '../widgets/spot_card.dart';
 
 sealed class _Filter {
@@ -39,6 +40,12 @@ class SavedPlacesScreen extends StatefulWidget {
   final FavoritesSync sync;
   final VoidCallback onRetrySync;
 
+  /// When the copy on the phone came from the server; shown while offline.
+  final DateTime? offlineSince;
+
+  /// Spots changed offline that the server doesn't have yet.
+  final Set<String> pendingIds;
+
   const SavedPlacesScreen({
     super.key,
     required this.spots,
@@ -47,6 +54,8 @@ class SavedPlacesScreen extends StatefulWidget {
     required this.nearbyLoader,
     this.sync = FavoritesSync.loaded,
     required this.onRetrySync,
+    this.offlineSince,
+    this.pendingIds = const {},
   });
 
   @override
@@ -153,6 +162,17 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                       ],
                     ),
                   ),
+                  if (widget.sync == FavoritesSync.offline &&
+                      saved.isNotEmpty &&
+                      _filter is! _Nearby) ...[
+                    const SizedBox(height: 10),
+                    OfflineBanner(
+                      message: switch (widget.offlineSince) {
+                        final at? => 'Offline · saved places from ${hourMinute(at)}',
+                        null => 'Offline · saved places on this phone',
+                      },
+                    ),
+                  ],
                   const SizedBox(height: 4),
                 ],
               ),
@@ -173,18 +193,9 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                   onOpenSettings: widget.nearbyLoader.openLocationSettings,
                 ),
               ),
-            _ when visible.isEmpty &&
-                    _filter is! _Nearby &&
-                    widget.sync == FavoritesSync.loading =>
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: Center(
-                  child: CircularProgressIndicator(color: AppColors.tomato),
-                ),
-              ),
-            _ when visible.isEmpty &&
-                    _filter is! _Nearby &&
-                    widget.sync == FavoritesSync.failed =>
+            // A server error is not "offline": the copy on the phone isn't
+            // shown as if it were current, the student gets the error and Retry.
+            _ when _filter is! _Nearby && widget.sync == FavoritesSync.failed =>
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: Center(
@@ -194,16 +205,41 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Text(
-                          "Couldn't load your saved places. Check your connection and try again.",
+                          "The server couldn't load your saved places right now.",
                           textAlign: TextAlign.center,
                           style: TextStyle(color: AppColors.muted),
                         ),
                         const SizedBox(height: 8),
                         TextButton(
                           onPressed: widget.onRetrySync,
-                          child: const Text('Try again'),
+                          child: const Text('Retry'),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+              ),
+            _ when visible.isEmpty &&
+                    _filter is! _Nearby &&
+                    widget.sync == FavoritesSync.loading =>
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: CircularProgressIndicator(color: AppColors.tomato),
+                ),
+              ),
+            _ when saved.isEmpty &&
+                    _filter is! _Nearby &&
+                    widget.sync == FavoritesSync.offline =>
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      "Offline · your saved places show up when you're back online",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.muted),
                     ),
                   ),
                 ),
@@ -231,10 +267,30 @@ class _SavedPlacesScreenState extends State<SavedPlacesScreen> {
                   separatorBuilder: (_, _) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
                     final spot = visible[index];
-                    return SpotCard(
+                    final card = SpotCard(
                       spot: spot,
                       onToggleSaved: () => widget.onToggleSaved(spot.id),
                     onTap: widget.onOpenSpot == null ? null : () => widget.onOpenSpot!(spot.id),
+                    );
+                    if (!widget.pendingIds.contains(spot.id)) return card;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        card,
+                        const Padding(
+                          padding: EdgeInsets.only(top: 6, left: 4),
+                          child: Row(
+                            children: [
+                              Icon(Icons.sync, size: 13, color: AppColors.muted),
+                              SizedBox(width: 4),
+                              Text(
+                                'Waiting to sync',
+                                style: TextStyle(fontSize: 11, color: AppColors.muted),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),

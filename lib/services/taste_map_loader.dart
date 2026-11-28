@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../models/nearby_pick.dart';
@@ -66,6 +68,11 @@ class TasteMapLoader {
   final TasteMapStorage _storage;
   final TasteMapPrefs _prefs;
 
+  /// How long to wait for a GPS fix. Offline (airplane mode, indoors) the
+  /// phone has no network help to find itself and a fix can take minutes, so
+  /// after this the map uses the campus center instead of spinning forever.
+  final Duration locationTimeout;
+
   TasteMapLoader({
     this._location = const LocationService(),
     required this._recommendations,
@@ -73,6 +80,7 @@ class TasteMapLoader {
     required this._storage,
     required this._prefs,
     LruCache<String, List<NearbyPick>>? cache,
+    this.locationTimeout = const Duration(seconds: 12),
   }) : _cache = cache ?? LruCache(capacity: 8, ttl: const Duration(minutes: 5));
 
   /// Cache key: the user plus the position rounded to 3 decimals (about
@@ -92,10 +100,14 @@ class TasteMapLoader {
     var lng = campusLng;
     var usedFallback = false;
     try {
-      final position = await _location.getCurrentPosition();
+      final position = await _location.getCurrentPosition().timeout(locationTimeout);
       lat = position.latitude;
       lng = position.longitude;
     } on LocationException {
+      usedFallback = true;
+    } catch (e) {
+      // Timeout or a plugin error: never leave the map loading forever.
+      debugPrint("Couldn't get the location for the Taste Map: $e");
       usedFallback = true;
     }
 

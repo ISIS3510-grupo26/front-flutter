@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/spots_data.dart';
 import '../models/best_for_you.dart';
 import '../services/best_for_you_loader.dart';
 import '../theme/app_colors.dart';
@@ -62,6 +63,7 @@ class BestForYouSection extends StatelessWidget {
                   RankedSpotCard(
                     rank: index + 1,
                     emoji: spot.emoji,
+                    imageUrl: catalogImageUrl(spot.spotId),
                     name: spot.name,
                     detail: _wait(spot),
                     // Saved offline, "reported 5 min ago" would be counted

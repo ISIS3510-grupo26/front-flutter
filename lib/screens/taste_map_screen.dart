@@ -10,6 +10,7 @@ import '../models/telemetry_event.dart';
 import '../services/cached_tile_provider.dart';
 import '../services/map_display_event.dart';
 import '../services/map_event_outbox.dart';
+import '../services/reconnect_retry.dart';
 import '../services/taste_map_loader.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
@@ -27,6 +28,11 @@ class TasteMapScreen extends StatefulWidget {
   /// BQ14 map_display events go here while offline.
   final MapEventOutbox outbox;
 
+  /// Saves the pages of these spots on the phone, so they open offline.
+  /// Called in the background after every fresh load; returns how many were
+  /// saved.
+  final Future<int> Function(List<String> spotIds)? prefetchDetails;
+
   const TasteMapScreen({
     super.key,
     required this.loader,
@@ -34,6 +40,7 @@ class TasteMapScreen extends StatefulWidget {
     required this.currentUserId,
     this.onOpenSpot,
     this.outbox = const MapEventOutbox(),
+    this.prefetchDetails,
   });
 
   @override
@@ -42,7 +49,17 @@ class TasteMapScreen extends StatefulWidget {
 
 class _TasteMapScreenState extends State<TasteMapScreen> {
   TasteMapState _state = const TasteMapLoading();
-  int _selected = 0;
+
+  /// Micro-optimization: the selected pin lives in a ValueNotifier instead of
+  /// the screen's state. Tapping a pin rebuilds only the two pins whose look
+  /// changes and the place card, never the map, its tiles or the other pins.
+  final _selection = ValueNotifier<int>(0);
+
+  /// Micro-optimization: the map is built once per load (see [_buildMap]) and
+  /// the same widget instance is returned on every rebuild of the screen, so
+  /// Flutter skips its whole subtree when the connectivity banner or anything
+  /// else outside the map changes.
+  Widget? _map;
   late final StreamSubscription<List<ConnectivityResult>> _connectivity;
   bool _online = true;
 
@@ -52,6 +69,13 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   /// At most one 'tiles_failed' event per load (and none for cached loads).
   bool _tilesFailedReported = false;
 
+  /// Increases with every load; a result is shown only if no newer load
+  /// started meanwhile (e.g. refresh tapped while it was reconnecting).
+  int _loadId = 0;
+
+  /// True while the reloads after a reconnection are running.
+  bool _reconnecting = false;
+
   @override
   void initState() {
     super.initState();
@@ -59,7 +83,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
     Connectivity()
         .checkConnectivity()
         .then((results) {
-          _online = _isOnline(results);
+          if (mounted) setState(() => _online = _isOnline(results));
         })
         .catchError((Object e) => debugPrint("Couldn't check connectivity: $e"));
     _forwardSavedEvents();
@@ -69,6 +93,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   @override
   void dispose() {
     _connectivity.cancel();
+    _selection.dispose();
     super.dispose();
   }
 
@@ -77,30 +102,68 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   /// while it shows offline picks or a network error, reloads by itself.
   void _onConnectivityChanged(List<ConnectivityResult> results) {
     final online = _isOnline(results);
-    _online = online;
-    if (online) _forwardSavedEvents();
-    final showingOffline = switch (_state) {
-      TasteMapLoaded(:final offlineSavedAt) => offlineSavedAt != null,
-      TasteMapFailed(reason: TasteMapFailure.network) => true,
-      _ => false,
-    };
-    if (online && showingOffline) _load(forceRefresh: true);
+    if (mounted) setState(() => _online = online);
+    if (!online) return;
+    _forwardSavedEvents();
+    if (_showsOfflineData(_state)) _reloadAfterReconnect();
   }
 
   static bool _isOnline(List<ConnectivityResult> results) =>
       results.any((r) => r != ConnectivityResult.none);
 
-  Future<void> _load({bool forceRefresh = false}) async {
-    setState(() => _state = const TasteMapLoading());
+  /// True when the screen shows the copy saved on the phone or the "no
+  /// connection" error.
+  static bool _showsOfflineData(TasteMapState state) => switch (state) {
+        TasteMapLoaded(:final offlineSavedAt) => offlineSavedAt != null,
+        TasteMapFailed(reason: TasteMapFailure.network) => true,
+        _ => false,
+      };
+
+  /// Right after reconnecting the network is often not usable yet, so one
+  /// reload is not enough: it retries a few times (1 s, 3 s, 6 s). The reloads
+  /// are silent: the saved picks stay on screen until fresh ones arrive.
+  void _reloadAfterReconnect() {
+    if (_reconnecting) return;
+    _reconnecting = true;
+    retryAfterReconnect(() async {
+      if (!mounted || !_showsOfflineData(_state)) return true;
+      await _load(forceRefresh: true, silent: true);
+      return !mounted || !_showsOfflineData(_state);
+    }).whenComplete(() => _reconnecting = false);
+  }
+
+  /// [silent]: no spinner, and a result that is still offline is dropped so
+  /// the screen keeps what it shows and no repeated BQ14 events are sent.
+  Future<void> _load({bool forceRefresh = false, bool silent = false}) async {
+    final id = ++_loadId;
+    if (!silent) setState(() => _state = const TasteMapLoading());
     _loadWatch
       ..reset()
       ..start();
     final state = await widget.loader.load(forceRefresh: forceRefresh);
-    if (!mounted) return;
+    if (!mounted || id != _loadId) return;
+    if (silent && _showsOfflineData(state)) return;
     _reportMapDisplay(state);
+    _selection.value = 0;
     setState(() {
       _state = state;
-      _selected = 0;
+      _map = state is TasteMapLoaded ? _buildMap(state) : null;
+    });
+    _prefetchDetails(state);
+  }
+
+  /// Eventual connectivity: after fresh picks arrive, their pages are saved
+  /// on the phone in the background (Future with handler, fire-and-forget),
+  /// so opening a pin offline still works.
+  void _prefetchDetails(TasteMapState state) {
+    final prefetch = widget.prefetchDetails;
+    if (prefetch == null || state is! TasteMapLoaded) return;
+    if (state.fromCache || state.offlineSavedAt != null || state.picks.isEmpty) return;
+    prefetch([for (final pick in state.picks.take(8)) pick.id])
+        .then((saved) => debugPrint('Saved $saved Taste Map pages for offline use'))
+        .catchError((Object e) {
+      debugPrint("Couldn't save the Taste Map pages offline: $e");
+      return 0;
     });
   }
 
@@ -113,7 +176,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
     }
     _tilesFailedReported = false;
     final errorType = mapDisplayErrorType(state);
-    _send(TelemetryEvent.mapDisplay(
+    _send(state, TelemetryEvent.mapDisplay(
       userId: widget.currentUserId(),
       success: errorType == null,
       errorType: errorType,
@@ -125,7 +188,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   void _reportTilesFailed() {
     if (_tilesFailedReported) return;
     _tilesFailedReported = true;
-    _send(TelemetryEvent.mapDisplay(
+    _send(_state, TelemetryEvent.mapDisplay(
       userId: widget.currentUserId(),
       success: false,
       errorType: 'tiles_failed',
@@ -134,11 +197,13 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
   }
 
   /// Online, the event goes to the TelemetryQueue. Offline, it is appended to
-  /// the file outbox. Future with handler: the write is fire-and-forget with
-  /// .then()/.catchError(), so the map never waits for the disk; if the write
-  /// fails the event still goes to the in-memory queue.
-  void _send(TelemetryEvent event) {
-    if (_online) return widget.telemetry.enqueue(event);
+  /// the file outbox. "Offline" is either what the phone reports or a load
+  /// that just failed for lack of network (Wi-Fi without internet, or the
+  /// first load before the connectivity check answered). Future with handler:
+  /// the write is fire-and-forget with .then()/.catchError(), so the map never
+  /// waits for the disk; if the write fails the event still goes to the queue.
+  void _send(TasteMapState state, TelemetryEvent event) {
+    if (_online && !_showsOfflineData(state)) return widget.telemetry.enqueue(event);
     widget.outbox
         .append(event)
         .then((_) => debugPrint('BQ14 event saved offline'))
@@ -156,6 +221,65 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
         .then((count) {
       if (count > 0) debugPrint('Forwarded $count BQ14 events saved offline');
     }).catchError((Object e) => debugPrint("Couldn't forward BQ14 events: $e"));
+  }
+
+  /// Builds the map of one load. Called once when the picks arrive, not on
+  /// every frame, so these micro-optimizations apply:
+  /// - The pins with impossible coordinates are filtered here, once: before,
+  ///   `hasValidCoordinates` (a Vincenty distance per pick) ran on every
+  ///   rebuild of the screen.
+  /// - One tile provider per load instead of a new `CachedTileProvider` (and
+  ///   its headers map) on every rebuild.
+  /// - Each pin listens to [_selection] by itself (_PinSlot).
+  Widget _buildMap(TasteMapLoaded state) {
+    final TasteMapLoaded(:picks, :userLat, :userLng) = state;
+    final validPins = [
+      for (var i = 0; i < picks.length; i++)
+        // A pin with impossible coordinates is not drawn (BQ14 reports it as
+        // invalid_coordinates).
+        if (hasValidCoordinates(picks[i], userLat, userLng)) i,
+    ];
+    return FlutterMap(
+      options: MapOptions(
+        initialCenter: LatLng(userLat, userLng),
+        initialZoom: 17,
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.example.campus_bites',
+          tileProvider: CachedTileProvider(),
+          errorTileCallback: (_, _, _) => _reportTilesFailed(),
+          // A tile that failed offline is loaded again when it
+          // is needed, instead of staying blank after reconnecting.
+          evictErrorTileStrategy: EvictErrorTileStrategy.notVisibleRespectMargin,
+        ),
+        MarkerLayer(
+          markers: [
+            Marker(
+              point: LatLng(userLat, userLng),
+              width: 18,
+              height: 18,
+              child: const _UserDot(),
+            ),
+            for (final i in validPins)
+              Marker(
+                point: LatLng(picks[i].latitude, picks[i].longitude),
+                // Tall enough for the selected pin, which adds
+                // a 3px white border on top of the base size.
+                width: 110,
+                height: 52,
+                alignment: Alignment.topCenter,
+                child: _PinSlot(
+                  index: i,
+                  pick: picks[i],
+                  selection: _selection,
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
   }
 
   @override
@@ -229,64 +353,12 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                 _FailedView(reason: reason, onRetry: () => _load(forceRefresh: true)),
               TasteMapLoaded(
                 :final picks,
-                :final userLat,
-                :final userLng,
                 :final usedFallback,
                 :final offlineSavedAt,
               ) =>
                 Stack(
                   children: [
-                    FlutterMap(
-                      options: MapOptions(
-                        initialCenter: LatLng(userLat, userLng),
-                        initialZoom: 17,
-                      ),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'com.example.campus_bites',
-                          tileProvider: CachedTileProvider(),
-                          errorTileCallback: (_, _, _) => _reportTilesFailed(),
-                        ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              point: LatLng(userLat, userLng),
-                              width: 18,
-                              height: 18,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: AppColors.tomato,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 3),
-                                ),
-                              ),
-                            ),
-                            for (var i = 0; i < picks.length; i++)
-                              // A pin with impossible coordinates is not
-                              // drawn (BQ14 reports it as invalid_coordinates).
-                              if (hasValidCoordinates(picks[i], userLat, userLng))
-                                Marker(
-                                  point: LatLng(
-                                    picks[i].latitude,
-                                    picks[i].longitude,
-                                  ),
-                                  // Tall enough for the selected pin, which adds
-                                  // a 3px white border on top of the base size.
-                                  width: 110,
-                                  height: 52,
-                                  alignment: Alignment.topCenter,
-                                  child: _Pin(
-                                    pick: picks[i],
-                                    selected: i == _selected,
-                                    onTap: () => setState(() => _selected = i),
-                                  ),
-                                ),
-                          ],
-                        ),
-                      ],
-                    ),
+                    _map!,
                     Positioned(
                       top: 16,
                       right: 16,
@@ -304,7 +376,7 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                         ),
                       ),
                     ),
-                    if (offlineSavedAt != null)
+                    if (offlineSavedAt != null || !_online)
                       Positioned(
                         left: 16,
                         top: 16,
@@ -312,7 +384,9 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: OfflineBanner(
-                            message: 'Offline · showing your last picks from ${hourMinute(offlineSavedAt)}',
+                            message: offlineSavedAt != null
+                                ? 'Offline · showing your last picks from ${hourMinute(offlineSavedAt)}'
+                                : 'Offline · showing your recent picks',
                           ),
                         ),
                       )
@@ -335,12 +409,15 @@ class _TasteMapScreenState extends State<TasteMapScreen> {
                           if (picks.isEmpty)
                             const _NoPicksCard()
                           else
-                            _SelectedPlaceCard(
-                              pick: picks[_selected],
-                              rank: _selected + 1,
-                              onOpen: widget.onOpenSpot == null
-                                  ? null
-                                  : () => widget.onOpenSpot!(picks[_selected].id),
+                            ValueListenableBuilder<int>(
+                              valueListenable: _selection,
+                              builder: (context, selected, _) => _SelectedPlaceCard(
+                                pick: picks[selected],
+                                rank: selected + 1,
+                                onOpen: widget.onOpenSpot == null
+                                    ? null
+                                    : () => widget.onOpenSpot!(picks[selected].id),
+                              ),
                             ),
                         ],
                       ),
@@ -366,7 +443,7 @@ class _FailedView extends StatelessWidget {
     final message = switch (reason) {
       TasteMapFailure.signedOut => 'Sign in to see top spots near you.',
       TasteMapFailure.network =>
-        "Couldn't reach CampusBites. Check your connection and try again.",
+        "You're offline and there are no saved picks yet. The map will load by itself when you're back online.",
       TasteMapFailure.server =>
         "CampusBites couldn't load top spots right now. Try again in a moment.",
     };
@@ -455,6 +532,62 @@ class _NoPicksCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _UserDot extends StatelessWidget {
+  const _UserDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.tomato,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 3),
+      ),
+    );
+  }
+}
+
+/// One pin that rebuilds only when it becomes selected or stops being
+/// selected. With N pins, a tap rebuilds 2 of them instead of N.
+class _PinSlot extends StatefulWidget {
+  final int index;
+  final NearbyPick pick;
+  final ValueNotifier<int> selection;
+
+  const _PinSlot({required this.index, required this.pick, required this.selection});
+
+  @override
+  State<_PinSlot> createState() => _PinSlotState();
+}
+
+class _PinSlotState extends State<_PinSlot> {
+  late bool _selected = widget.selection.value == widget.index;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selection.addListener(_onSelectionChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.selection.removeListener(_onSelectionChanged);
+    super.dispose();
+  }
+
+  void _onSelectionChanged() {
+    final selected = widget.selection.value == widget.index;
+    if (selected != _selected) setState(() => _selected = selected);
+  }
+
+  @override
+  Widget build(BuildContext context) => _Pin(
+        pick: widget.pick,
+        selected: _selected,
+        onTap: () => widget.selection.value = widget.index,
+      );
 }
 
 class _Pin extends StatelessWidget {

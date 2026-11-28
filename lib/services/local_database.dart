@@ -14,18 +14,23 @@ import '../models/spot_detail.dart';
 /// - spot_details: the full `GET /spots/{id}` JSON plus when it was saved.
 /// - best_for_you_spots (version 2): the last "Best for you right now"
 ///   ranking (BQ6), one row per restaurant.
+/// - recommendation_candidates (version 3): restaurants opened from a
+///   compatibility recommendation that the student may still walk to (BQ9).
+/// - comparisons (version 3): the last comparisons made in Compare.
 ///
-/// Version 2 adds its table with an explicit migration: phones that already
-/// have version 1 keep their saved picks and pages instead of starting over.
+/// Each version adds its tables with an explicit migration: phones that
+/// already have an older version keep their saved picks, pages and rankings
+/// instead of starting over.
 Future<Database> openLocalDatabase() => _database ??= _open();
 
 Future<Database>? _database;
 
 Future<Database> _open() async => openDatabase(
       join(await getDatabasesPath(), 'campus_bites.db'),
-      version: 2,
+      version: 3,
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 2) await _createBestForYouTable(db);
+        if (oldVersion < 3) await _createSprint4Tables(db);
       },
       onCreate: (db, _) async {
         await db.execute('''
@@ -47,8 +52,33 @@ Future<Database> _open() async => openDatabase(
             saved_at TEXT NOT NULL
           )''');
         await _createBestForYouTable(db);
+        await _createSprint4Tables(db);
       },
     );
+
+/// Version 3: BQ9 visit candidates and the Compare history.
+Future<void> _createSprint4Tables(Database db) async {
+  await db.execute('''
+      CREATE TABLE recommendation_candidates (
+        event_id TEXT PRIMARY KEY,
+        user_id TEXT,
+        spot_id TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        opened_at TEXT NOT NULL
+      )''');
+  await db.execute('''
+      CREATE TABLE comparisons (
+        pair_id TEXT PRIMARY KEY,
+        first_id TEXT NOT NULL,
+        second_id TEXT NOT NULL,
+        first_name TEXT NOT NULL,
+        second_name TEXT NOT NULL,
+        first_emoji TEXT NOT NULL,
+        second_emoji TEXT NOT NULL,
+        compared_at TEXT NOT NULL
+      )''');
+}
 
 Future<void> _createBestForYouTable(Database db) => db.execute('''
       CREATE TABLE best_for_you_spots (

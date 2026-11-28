@@ -14,6 +14,8 @@ import '../repositories/spots_repository.dart';
 import '../services/favorites_controller.dart';
 import '../services/local_database.dart';
 import '../services/place_detail_loader.dart';
+import '../services/reconnect_retry.dart';
+import '../services/review_interactions.dart';
 import '../services/review_submitter.dart';
 import '../services/telemetry_queue.dart';
 import '../theme/app_colors.dart';
@@ -39,6 +41,13 @@ class PlaceDetailScreen extends StatefulWidget {
   /// Publishes reviews (BQ13) and keeps their drafts on the phone.
   final ReviewSubmitter reviewSubmitter;
 
+  /// Opens Compare with this spot as the first one. Null hides the button.
+  final ValueChanged<String>? onCompare;
+
+  /// Opens "All reviews" from "Student Reviews (N)", with the BQ8 actions of
+  /// this visit. Null leaves the title as plain text.
+  final void Function(SpotDetail spot, ReviewInteractionTracker? interactions)? onOpenAllReviews;
+
   const PlaceDetailScreen({
     super.key,
     required this.spotId,
@@ -50,6 +59,8 @@ class PlaceDetailScreen extends StatefulWidget {
     required this.onToggleSaved,
     required this.reviewSubmitter,
     this.storage = const SqliteSpotDetailStorage(),
+    this.onCompare,
+    this.onOpenAllReviews,
   });
 
   @override
@@ -63,6 +74,18 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
 
   /// Set while the page shows the copy saved on the phone.
   DateTime? _offlineSavedAt;
+
+  /// The last load failed because there is no network (not a server error).
+  bool _failedOffline = false;
+
+  /// A load is running: a second one (reconnect + Try again) is ignored.
+  bool _loading = false;
+
+  /// True while the reloads after a reconnection are running.
+  bool _reconnecting = false;
+
+  /// BQ8: the review actions of this visit (set once the visit is reported).
+  ReviewInteractionTracker? _interactions;
   late final StreamSubscription<List<ConnectivityResult>> _connectivity;
 
   @override
@@ -78,45 +101,72 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
     super.dispose();
   }
 
+  bool get _needsFreshData => _offlineSavedAt != null || _failed;
+
   /// Stream: when the connection comes back while the page shows saved data
-  /// (or an error), it reloads by itself. Not reported as a new visit.
+  /// (or an error), it reloads by itself. Right after reconnecting the network
+  /// is often not usable yet, so it retries a few times (1 s, 3 s, 6 s)
+  /// without a spinner. Not reported as a new visit.
   void _onConnectivityChanged(List<ConnectivityResult> results) {
     final online = results.any((r) => r != ConnectivityResult.none);
-    if (online && (_offlineSavedAt != null || _failed)) _load(reportVisit: false);
+    if (!online || !_needsFreshData || _reconnecting) return;
+    _reconnecting = true;
+    retryAfterReconnect(() async {
+      if (!mounted || !_needsFreshData) return true;
+      await _load(reportVisit: false, silent: true);
+      return !mounted || !_needsFreshData;
+    }).whenComplete(() => _reconnecting = false);
   }
 
-  Future<void> _load({required bool reportVisit}) async {
-    if (_failed) setState(() => _failed = false);
-    final watch = Stopwatch()..start();
-    final result = await loadPlaceDetail(
-      spotId: widget.spotId,
-      fetch: widget.repository.fetchSpot,
-      storage: widget.storage,
-    );
-    if (reportVisit) {
+  /// [silent]: the error message stays on screen while it tries again.
+  Future<void> _load({required bool reportVisit, bool silent = false}) async {
+    if (_loading) return;
+    _loading = true;
+    try {
+      if (_failed && !silent) setState(() => _failed = false);
+      final watch = Stopwatch()..start();
+      final result = await loadPlaceDetail(
+        spotId: widget.spotId,
+        fetch: widget.repository.fetchSpot,
+        storage: widget.storage,
+      );
       final error = result.error;
-      _report(watch.elapsedMilliseconds, httpStatus: error == null ? 200 : null, error: error);
-    }
-    if (!mounted) return;
-    setState(() {
-      if (result.spot case final spot?) {
-        _spot = spot;
-        _offlineSavedAt = result.offlineSavedAt;
-      } else {
-        _failed = true;
+      if (reportVisit) {
+        _report(watch.elapsedMilliseconds, httpStatus: error == null ? 200 : null, error: error);
       }
-    });
+      if (!mounted) return;
+      setState(() {
+        if (result.spot case final spot?) {
+          _spot = spot;
+          _offlineSavedAt = result.offlineSavedAt;
+          _failed = false;
+        } else {
+          _failed = true;
+          _failedOffline = error != null && isNetworkError(error);
+        }
+      });
+    } finally {
+      _loading = false;
+    }
   }
 
   void _report(int durationMs, {int? httpStatus, Object? error}) {
-    widget.telemetry.enqueue(TelemetryEvent.restaurantDetail(
+    final visit = TelemetryEvent.restaurantDetail(
       spotId: widget.spotId,
       userId: widget.currentUserId(),
       durationMs: durationMs,
       success: error == null,
       httpStatus: error is ApiException ? error.statusCode : httpStatus,
       errorType: error == null ? null : _errorType(error),
-    ));
+    );
+    // BQ8: the review actions of this visit are tied to this event.
+    _interactions = ReviewInteractionTracker(
+      spotId: widget.spotId,
+      visitEventId: visit.eventId,
+      currentUserId: widget.currentUserId,
+      send: widget.telemetry.enqueue,
+    );
+    widget.telemetry.enqueue(visit);
   }
 
   /// Same categories as the Kotlin app, so BQ2 can compare both apps.
@@ -206,9 +256,15 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
               ? Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      "Couldn't load this place.",
-                      style: TextStyle(fontSize: 15, color: AppColors.espresso),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                      child: Text(
+                        _failedOffline
+                            ? "You're offline and this place isn't saved on your phone yet. It will load by itself when you're back online."
+                            : "Couldn't load this place.",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 15, color: AppColors.espresso),
+                      ),
                     ),
                     const SizedBox(height: 8),
                     TextButton(
@@ -268,6 +324,12 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                           ),
                         );
                       },
+                    ),
+                  if (widget.onCompare case final compare?)
+                    IconButton(
+                      onPressed: () => compare(spot.id),
+                      tooltip: 'Compare',
+                      icon: const Icon(Icons.compare_arrows, color: AppColors.espresso),
                     ),
                   IconButton(
                     onPressed: () => _share(spot),
@@ -512,6 +574,9 @@ class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
                   hint: widget.canReview ? null : 'Sign in with an account to leave a review.',
                   offline: _offlineSavedAt != null,
                   hasDraft: widget.reviewSubmitter.store.hasDraft(spot.id),
+                  onSeeAll: widget.onOpenAllReviews == null
+                      ? null
+                      : () => widget.onOpenAllReviews!(spot, _interactions),
                 ),
                 const SizedBox(height: 10),
                 for (final review in spot.reviews) ...[
@@ -576,12 +641,16 @@ class _ReviewsHeader extends StatelessWidget {
   /// The student left a review half written here (saved in Hive).
   final bool hasDraft;
 
+  /// Opens "All reviews"; null leaves the title as plain text.
+  final VoidCallback? onSeeAll;
+
   const _ReviewsHeader({
     required this.totalReviews,
     required this.onWrite,
     this.hint,
     this.offline = false,
     this.hasDraft = false,
+    this.onSeeAll,
   });
 
   @override
@@ -592,12 +661,24 @@ class _ReviewsHeader extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Text(
-                'Student Reviews ($totalReviews)',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.espresso,
+              child: InkWell(
+                onTap: onSeeAll,
+                borderRadius: BorderRadius.circular(8),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Student Reviews ($totalReviews)',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.espresso,
+                        ),
+                      ),
+                    ),
+                    if (onSeeAll != null)
+                      const Icon(Icons.chevron_right, color: AppColors.tomato),
+                  ],
                 ),
               ),
             ),

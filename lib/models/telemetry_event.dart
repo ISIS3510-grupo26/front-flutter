@@ -15,16 +15,20 @@ class TelemetryEvent {
 
   /// BQ7: [userId] saved [spotId]. The backend rejects the whole batch if a
   /// favorite_added event lacks either, so both are required here.
+  /// A save made offline passes the [eventId] and time saved with it, so
+  /// sending it again after a crash is never counted as a second save.
   TelemetryEvent.favoriteAdded({
     required String this.userId,
     required String this.spotId,
-  })  : eventId = _newEventId(),
+    String? eventId,
+    DateTime? occurredAt,
+  })  : eventId = eventId ?? _newEventId(),
         screen = 'favorite_added',
         durationMs = 0,
         success = true,
         httpStatus = null,
         errorType = null,
-        occurredAt = DateTime.now().toUtc();
+        occurredAt = (occurredAt ?? DateTime.now()).toUtc();
 
   /// BQ3: the student opened [spotId] from For You search results. The
   /// backend counts these as the restaurant's searches for that hour.
@@ -75,6 +79,54 @@ class TelemetryEvent {
         screen = 'review_submit',
         occurredAt = startedAt.toUtc();
 
+  /// BQ9: the student opened [spotId] from a compatibility recommendation
+  /// ("Best for you right now" or the For You feed sorted by match). The
+  /// [eventId] is also the id of the visit candidate saved on the phone.
+  TelemetryEvent.recommendationOpen({
+    required String this.spotId,
+    this.userId,
+    String? eventId,
+    DateTime? occurredAt,
+  })  : eventId = eventId ?? _newEventId(),
+        screen = 'recommendation_open',
+        durationMs = 0,
+        success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = (occurredAt ?? DateTime.now()).toUtc();
+
+  /// BQ9: the phone arrived at [spotId] after the student opened it from a
+  /// recommendation. [eventId] is derived from the candidate, so finding the
+  /// same visit twice (two checks at once, a resend) is never counted twice.
+  TelemetryEvent.recommendationVisit({
+    required String this.spotId,
+    this.userId,
+    required this.eventId,
+    DateTime? occurredAt,
+  })  : screen = 'recommendation_visit',
+        durationMs = 0,
+        success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = (occurredAt ?? DateTime.now()).toUtc();
+
+  /// BQ8: during the visit to [spotId] whose restaurant_detail event is
+  /// [visitEventId], the student used the reviews ([action]). The id is
+  /// derived from both, so the same action twice in one visit is one event
+  /// (the backend also ignores a repeated id).
+  TelemetryEvent.reviewInteraction({
+    required String this.spotId,
+    required String visitEventId,
+    required ReviewAction action,
+    this.userId,
+  })  : eventId = 'rvi-$visitEventId-${action.wire}',
+        screen = 'review_interaction',
+        durationMs = 0,
+        success = true,
+        httpStatus = null,
+        errorType = null,
+        occurredAt = DateTime.now().toUtc();
+
   /// Reads back an event written with [toJson] (the BQ14 offline outbox).
   /// Keeps the same eventId, so a resend is never counted twice.
   TelemetryEvent.fromJson(Map<String, dynamic> json)
@@ -109,4 +161,18 @@ class TelemetryEvent {
         for (var i = 0; i < 16; i++)
           _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
       ].join();
+}
+
+/// What the student did with the reviews (BQ8), with the name the backend
+/// expects at the end of the eventId.
+enum ReviewAction {
+  openAll('open_all'),
+  sort('sort'),
+  filter('filter'),
+  search('search'),
+  helpful('helpful');
+
+  final String wire;
+
+  const ReviewAction(this.wire);
 }
