@@ -1,0 +1,17 @@
+scenario,metric,run1,run2,run3,mean
+home_shell_heart_taps,average_frame_build_time_millis,3.04,3.2,3.31,3.18
+home_shell_heart_taps,90th_percentile_frame_build_time_millis,4.38,4.19,4.35,4.31
+home_shell_heart_taps,99th_percentile_frame_build_time_millis,20.5,21.95,21.12,21.19
+home_shell_heart_taps,worst_frame_build_time_millis,25.12,25.84,25.69,25.55
+home_shell_heart_taps,missed_frame_build_budget_count,13,16,17,15.33
+home_shell_heart_taps,average_frame_rasterizer_time_millis,4.21,4.31,4.34,4.29
+home_shell_heart_taps,90th_percentile_frame_rasterizer_time_millis,4.89,4.95,4.93,4.92
+home_shell_heart_taps,frame_count,416,416,418,416.67
+home_shell_heart_taps_builds,average_frame_build_time_millis,3.51,3.43,3.29,3.41
+home_shell_heart_taps_builds,90th_percentile_frame_build_time_millis,4.22,4.28,4.17,4.22
+home_shell_heart_taps_builds,99th_percentile_frame_build_time_millis,30.93,30.66,31.24,30.94
+home_shell_heart_taps_builds,worst_frame_build_time_millis,32.85,33.27,33.89,33.34
+home_shell_heart_taps_builds,missed_frame_build_budget_count,19,18,18,18.33
+home_shell_heart_taps_builds,average_frame_rasterizer_time_millis,4.2,4.35,4.25,4.27
+home_shell_heart_taps_builds,90th_percentile_frame_rasterizer_time_millis,4.8,4.99,4.99,4.93
+home_shell_heart_taps_builds,frame_count,417,416,420,417.67

@@ -480,17 +480,26 @@ class _HomeShellState extends State<HomeShell> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// What For You is rebuilt for: the saved state of its cards and the
+  /// preferences (saving Taste Profile changes what BQ6 asks for).
+  late final _forYouInputs = Listenable.merge([_favorites, _preferences]);
+
+  /// Micro-optimization (Sprint 4): each tab listens only to what it shows.
+  /// Before, one ListenableBuilder over the whole IndexedStack rebuilt the four
+  /// tabs, hidden ones included, on every heart tap (about 1,750 widgets).
+  /// Now a tap rebuilds For You and Saved; Taste Map uses neither, and Profile
+  /// listens to the preferences itself. docs/profiling/home_shell_rebuilds/
+  /// has the measurements before and after.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.cream,
-      body: ListenableBuilder(
-        // Preferences too: saving Taste Profile changes what BQ6 asks for.
-        listenable: Listenable.merge([_favorites, _preferences]),
-        builder: (context, _) => IndexedStack(
-          index: _index,
-          children: [
-            ForYouScreen(
+      body: IndexedStack(
+        index: _index,
+        children: [
+          ListenableBuilder(
+            listenable: _forYouInputs,
+            builder: (context, _) => ForYouScreen(
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,
               onOpenSpot: _openSpot,
@@ -507,18 +516,21 @@ class _HomeShellState extends State<HomeShell> {
               bestForYouProfile: BestForYouProfile.from(_preferences.current),
               connectivity: Connectivity().onConnectivityChanged,
             ),
-            TasteMapScreen(
-              loader: _tasteMapLoader,
-              telemetry: _telemetry,
-              currentUserId: () => widget.session.userId,
-              onOpenSpot: _openSpot,
-              prefetchDetails: (ids) => prefetchPlaceDetails(
-                spotIds: ids,
-                fetch: _spots.fetchSpot,
-                storage: const SqliteSpotDetailStorage(),
-              ),
+          ),
+          TasteMapScreen(
+            loader: _tasteMapLoader,
+            telemetry: _telemetry,
+            currentUserId: () => widget.session.userId,
+            onOpenSpot: _openSpot,
+            prefetchDetails: (ids) => prefetchPlaceDetails(
+              spotIds: ids,
+              fetch: _spots.fetchSpot,
+              storage: const SqliteSpotDetailStorage(),
             ),
-            SavedPlacesScreen(
+          ),
+          ListenableBuilder(
+            listenable: _favorites,
+            builder: (context, _) => SavedPlacesScreen(
               spots: _favorites.spots,
               onToggleSaved: _toggleSaved,
               nearbyLoader: _nearbyLoader,
@@ -528,17 +540,18 @@ class _HomeShellState extends State<HomeShell> {
               offlineSince: _favorites.copySavedAt,
               pendingIds: _favorites.pendingIds,
             ),
-            ProfileScreen(
-              onSignOut: widget.session.signOut,
-              onChangePassword: widget.session.state is AuthSignedIn
-                  ? _openChangePassword
-                  : null,
-              preferences: _preferences,
-              preferencesSync: _preferencesSync,
-              displayName: _displayName,
-            ),
-          ],
-        ),
+          ),
+          // Profile listens to the preferences itself (its tags).
+          ProfileScreen(
+            onSignOut: widget.session.signOut,
+            onChangePassword: widget.session.state is AuthSignedIn
+                ? _openChangePassword
+                : null,
+            preferences: _preferences,
+            preferencesSync: _preferencesSync,
+            displayName: _displayName,
+          ),
+        ],
       ),
       bottomNavigationBar: CampusBottomNavBar(
         currentIndex: _index,

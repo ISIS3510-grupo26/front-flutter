@@ -1,0 +1,9 @@
+actions in the trace: 20
+widget builds per action: 1516.0
+  ForYouScreen: 1.00 per action
+  TasteMapScreen: 0.00 per action
+  SavedPlacesScreen: 1.00 per action
+  ProfileScreen: 0.00 per action
+  SpotCard: 5.50 per action
+  IndexedStack: 0.00 per action
+  CampusBottomNavBar: 0.00 per action
