@@ -52,7 +52,7 @@ python docs/profiling/for_you_search/profiling.py collect before 1
 python docs/profiling/for_you_search/profiling.py table
 ```
 
-"Before" is commit `Profiling: prueba de la búsqueda de For You...` and "after" is the next one,
+"Before" is commit f9aee11 and "after" is commit 883fbad,
 `Micro-optimización: For You calcula el feed...`.
 
 ## Results
@@ -74,7 +74,8 @@ python docs/profiling/for_you_search/profiling.py table
 | missed_budget_builds_on | 1 | 3 | +200% | 0 / 1 / 1 | 2 / 3 / 3 |
 | gc_ms | 17 | 18.9 | +11% | 14.4 / 17 / 17 | 20.6 / 17.8 / 18.9 |
 
-(table from `profiling.py table`)
+After the optimization the feed is calculated 12 times in the 32 changes (0.38 per change), exactly the changes where the search text really changes (6 letters typed and 6 deleted); the 18 cursor moves, the space and removing that space no longer do anything. Before it was 19 times: on a real phone several notifications that arrive in the same frame produce a single build, so not all 32 became a rebuild, but the cursor moves still did. With less work the time spent calculating the feed drops 60%, a quarter of the widgets are no longer built and the average frame is faster. The 99th percentile and the worst frame are the 2 or 3 frames per run where the screen switches between the feed and the search results (first letter and empty box), rebuilt in both versions; with only 64 frames per run they depend on one frame and moved in the other direction. They stay the cost of that switch, not of the cursor moves.
+
 
 What each row means:
 
